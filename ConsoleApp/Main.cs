@@ -18,7 +18,9 @@ namespace ConsoleApp {
       public bool shouldRename { get; set; }
       [Option('s',"simulate", Required = false, HelpText = "Simulate an action.")]
       public bool ShouldSimulate { get; set; }
-      [Option('p', "path", Required = true, HelpText = "Location of source file/s.")]
+      [Option("fv", Required = false, HelpText = "ffmpeg version")]
+      public bool ShouldShowFFV { get; set; }
+      [Option('p', "path", Required = false, HelpText = "Location of source file/s.")]
       public string Path { get; set; }
     }
 
@@ -38,13 +40,13 @@ namespace ConsoleApp {
     static void Main(string[] args) {
       Parser.Default.ParseArguments<Options>(args)
         .WithParsed<Options>(o => {
-          if (ValidateCommandLine(o)) {
-            /* var app = new MediaTool(o.Path.EndsWith(@"\") ? o.Path.Substring(0, o.Path.Length -
-              1) : o.Path, o.shouldRename,
-              o.ShouldSimulate);
+          if (o.ShouldShowFFV)
+            new MediaTool(o.ShouldShowFFV).ShowFFMpegVersion();
+          else if (ValidateCommandLine(o)) {
+            var app = new MediaTool(o.Path.EndsWith(@"\") ? o.Path.Substring(0, o.Path.Length -
+              1) : o.Path, o.shouldRename, o.ShouldSimulate);
             app.Run();
-            app.DisplaySummary(); */
-            Console.WriteLine("hello");
+            app.DisplaySummary();
           }
         });
       return;
