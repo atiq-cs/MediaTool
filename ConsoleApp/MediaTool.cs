@@ -7,11 +7,10 @@ namespace ConsoleApp {
   using System.Collections.Generic;
 
   /// <summary>
-  /// A Code Formatting Application
+  /// Perform actions on Media Files
   /// 
   /// Documentation (requirements/features/design decisions) at
-  /// https://github.com/atiq-cs/CodeFormatter/wiki
-  /// 
+  /// https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
   /// </summary>
   class MediaTool {
     /// <summary>
@@ -103,12 +102,6 @@ namespace ConsoleApp {
     /// <summary>
     /// ToDo: update for new design
     /// Set an action based on user choice and perform action to specified file
-    /// This action is stream (file content) editing for the file. Right now,
-    /// following caveats are not taken into account,
-    ///  Unmanageable file size: >= 1 GB, check read files (API in msdn) limit
-    /// Actions:
-    /// - Replace Tabs
-    /// - Do all styling to apply modern format in source code
     /// </summary>
     private void ProcessFile(string filePath) {
       var ext = new DirectoryInfo(filePath).Extension.Substring(1);
@@ -173,28 +166,8 @@ namespace ConsoleApp {
       Console.WriteLine("Following source file types covered:");
     }
 
-    public void ShowFFMpegVersion() {
-      // Start the child process.
-      var p = new System.Diagnostics.Process();
-      // Redirect the output stream of the child process.
-      p.StartInfo.FileName = @"D:\PFiles_x64\PT\ffmpeg\bin\ffmpeg.exe";
-      p.StartInfo.Arguments = "-version";
-      p.StartInfo.UseShellExecute = false;
-      p.StartInfo.RedirectStandardOutput = true;
-      p.Start();
-      // Do not wait for the child process to exit before
-      // reading to the end of its redirected stream.
-      // p.WaitForExit();
-      // Read the output stream first and then wait.
-      string output = p.StandardOutput.ReadToEnd();
-      // Write the redirected output to this application's window.
-      Console.WriteLine(output);
-      p.WaitForExit();
-      p.Close();
-    }
-
     /// <summary>
-    /// Run automation for the app
+    /// Automaton of the app
     /// </summary>
     public void Run() {
       Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + Path +
