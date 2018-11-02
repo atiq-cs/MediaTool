@@ -3,7 +3,6 @@
 
 namespace ConsoleApp {
   using System;
-  // using System.Collections.Generic;
   using System.Threading.Tasks;
 
   /// <summary>
@@ -70,6 +69,9 @@ namespace ConsoleApp {
         // everything valid so far, assume default action
         if (string.IsNullOrEmpty(Action))
           Action = "convert";
+
+        if (arguments[arguments.Length - 1] == "simulate")
+          ShouldSimulate = true;
         return true;
       }
     }
