@@ -95,7 +95,7 @@ namespace ConsoleApp {
     /// <param name="start"> start of result comment block</param>
     /// <param name="end"> end of result comment block</param>
     public void RenameDemo() {
-      FileInfo.SetDirtyFlag("rename");
+      FileInfo.SetDirtyFlag("convert");
     }
 
 
