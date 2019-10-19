@@ -3,10 +3,10 @@
 
 namespace ConsoleApp {
   using System;
+  using System.IO;
   using System.Net.Http;
   using System.Threading.Tasks;
   using System.Runtime.InteropServices;
-  using System.IO;
 
   /// <summary>
   /// Class to represent entity that performs update of local ffmpeg to latest stable version
@@ -14,10 +14,12 @@ namespace ConsoleApp {
   class Updater {
     // States from CLA
     private bool ShouldSimulate { get; set; }
-    private string ffmpegLocation;
+    private string ffmpegLocation { get; set; }
 
     /// <summary>
     /// Constructor: sets first 5 properties
+    /// <param name="ShouldSimulate"> whether to perform actual update </param>
+    /// <param name="ffmpegLocation"> location of ffmpeg binary </param>
     /// </summary>
     public Updater(bool ShouldSimulate, string ffmpegLocation = @"D:\PFiles_x64\PT\ffmpeg") {
       this.ShouldSimulate = ShouldSimulate;
@@ -131,6 +133,7 @@ namespace ConsoleApp {
       var ffmpegURL = "https://ffmpeg.zeranoe.com/builds/win64/shared/ffmpeg-" + latestVersion + "-win64-shared.zip";
       // download and extract latest ffmpeg
       HttpClient client = new HttpClient();
+      // check later when getting exception about forcibly closed connetion on transport
       // System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls11 |
       //  System.Net.SecurityProtocolType.Tls12;
 
@@ -161,7 +164,42 @@ namespace ConsoleApp {
       FileOperationAPIWrapper.Send(zipFileNameWithExt);
     }
 
-    // ref: https://stackoverflow.com/questions/3282418/send-a-file-to-the-recycle-bin
+    /// <summary>
+    /// Compare local and online ffmpeg versions, retrieve these info asynchronously. Based on
+    /// comparison result initiate an update asynchronously
+    /// <c> versionStringMaxLength </c> is 7 for stable version. To support beta release parsing it
+    /// is currently set to 20. ref, https://ffmpeg.zeranoe.com/builds/
+    /// In future: may be support update to beta version
+    /// </summary>
+    public async Task UpdateFFMpegAsync() {
+      const int versionStringMaxLength = 20;
+      var ffmpegGetOnlineStringTask = Task.Run(() => GetLatestFFMpegVersionAsync());
+      // at this point, runs fibo and timer concurrently
+      var localVersion = GetLocalFFMpegVersion();
+      // now let's wait till timer finishes
+      var latestVersion = await ffmpegGetOnlineStringTask;
+      if (localVersion == string.Empty || latestVersion == string.Empty || localVersion.Length >
+        versionStringMaxLength || latestVersion.Length > versionStringMaxLength) {
+        Console.WriteLine("Error while retrieving version information!");
+        return;
+      }
+      Console.WriteLine("Local version: " + localVersion);
+      Console.WriteLine("Latest stable found online: " + latestVersion);
+      if (localVersion != latestVersion) {
+        if (ShouldSimulate) {
+          Console.WriteLine("Remove simulate flag to update");
+          return;
+        }
+        await UpdateLocalFFMpeg(localVersion, latestVersion);
+      }
+    }
+
+    // Utility Classes and Class Extensions are below
+
+    /// <summary> Provides a wrapper to send files/directories to recycle bin using Shell
+    /// Application. <see cref="UpdateLocalFFMpeg"/> 
+    /// ref, https://stackoverflow.com/questions/3282418/send-a-file-to-the-recycle-bin
+    /// </summary>
     public class FileOperationAPIWrapper {
       /// <summary>
       /// Possible flags for the SHFileOperation method.
@@ -259,42 +297,19 @@ namespace ConsoleApp {
 
       /// <summary>
       /// Send file to recycle bin.  Display dialog, display warning if files are too big to fit (FOF_WANTNUKEWARNING)
+      /// Used by <see cref="UpdateLocalFFMpeg"/>
       /// </summary>
       /// <param name="path">Location of directory or file to recycle</param>
       public static bool Send(string path) {
         return Send(path, FileOperationFlags.FOF_NOCONFIRMATION | FileOperationFlags.FOF_WANTNUKEWARNING);
       }
     }
-
-    /// <summary>
-    /// Update ffmpeg
-    /// Future: may be support update to beta version
-    /// </summary>
-    public async Task UpdateFFMpegAsync() {
-      const int versionStringMaxLength = 20;
-      var ffmpegGetOnlineStringTask = Task.Run(() => GetLatestFFMpegVersionAsync());
-      // at this point, runs fibo and timer concurrently
-      var localVersion = GetLocalFFMpegVersion();
-      // now let's wait till timer finishes
-      var latestVersion = await ffmpegGetOnlineStringTask;
-      if (localVersion == string.Empty || latestVersion == string.Empty || localVersion.Length >
-        versionStringMaxLength || latestVersion.Length > versionStringMaxLength) {
-        Console.WriteLine("Error while retrieving version information!");
-        return ;
-      }
-      Console.WriteLine("Local version: " + localVersion);
-      Console.WriteLine("Latest stable found online: " + latestVersion);
-      if (localVersion != latestVersion) {
-        if (ShouldSimulate) {
-          Console.WriteLine("Remove simulate flag to update");
-          return ;
-        }
-        await UpdateLocalFFMpeg(localVersion, latestVersion);
-      }
-    }
   }
 
-  // ref: blogs.msdn.microsoft.com/henrikn/2012/02/17/httpclient-downloading-to-a-local-file/ 
+  /// <summary> Provides an async method extension to GetAsync so the content can be saved in a file
+  /// Application. <see cref="UpdateLocalFFMpeg"/>
+  /// ref, blogs.msdn.microsoft.com/henrikn/2012/02/17/httpclient-downloading-to-a-local-file/ 
+  /// </summary>
   public static class HttpContentExtensions {
     public static Task ReadAsFileAsync(this HttpContent content, string filename, bool overwrite) {
       string pathname = Path.GetFullPath(filename);
