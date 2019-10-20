@@ -8,11 +8,7 @@ namespace ConsoleApp {
   /// <summary>
   /// Entry Point class containing command line parser and instantiator main
   /// method
-  /// Usage,
-  ///  dotnet run -- update
-  ///  dotnet run -- update simulate
-  ///  dotnet run -- D:\MyApp simulate
-  ///  dotnet run -- --rename --path D:\MyApp
+  /// Usage: check read me
   /// </summary>
   class MediaToolDemo {
     public class CommandLine {
