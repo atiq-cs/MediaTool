@@ -129,7 +129,8 @@ namespace ConsoleApp {
       if (Directory.Exists(dirToDelete))
         FileOperationAPIWrapper.Send(dirToDelete);
       Console.WriteLine("Waiting for ffmpeg dir lock to be freed..");
-      await Task.Delay(1000);
+      // 3s did not work on 02-15 for some reason, increased to 10s
+      await Task.Delay(10000);
       Directory.Move(ffmpegLocation, dirToDelete);
       // example URL: 
       var ffmpegURL = "https://ffmpeg.zeranoe.com/builds/win64/shared/ffmpeg-" + latestVersion + "-win64-shared.zip";
