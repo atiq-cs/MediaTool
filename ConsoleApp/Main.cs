@@ -86,7 +86,7 @@ namespace ConsoleApp {
       }
       else {
         var app = new MediaTool(options.Path.EndsWith(@"\") ? options.Path.Substring(0, options.Path.Length -
-          1) : options.Path, true, options.ShouldSimulate);
+          1) : options.Path, options.Action != "convert", options.ShouldSimulate);
         app.Run();
         app.DisplaySummary();
       }
