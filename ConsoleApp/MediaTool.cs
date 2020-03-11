@@ -14,6 +14,8 @@ namespace ConsoleApp {
   /// 
   /// Examples at,
   ///  https://github.com/atiq-cs/MediaTool/wiki/Command-Line-Arguments-Design
+  /// To keep the file uncluttered, debug statements are in
+  //    https://paper.dropbox.com/doc/Media-Tool-Debug-Statements--Av~lz37uTd4Np_PcJIHWlv2fAg-oLfBN5rCuojDp1GPHiXPB
   /// </summary>
   class MediaTool {
     public enum CONVERTSTAGE {
@@ -112,13 +114,12 @@ namespace ConsoleApp {
       var year = GetYear();
       var title = GetTitle();
       var ripInfo = GetRipperInfo();
-      // Console.WriteLine("year " + year);
-      // Console.WriteLine("Title " + title);
-      // Console.WriteLine("Rip Info " + ripInfo);
       var outFileName = System.IO.Path.GetDirectoryName(FileInfo.Path) + '\\' + title + ' ' + year + ripInfo;
       if (FileInfo.Path != outFileName) {
-        FileInfo.SetDirtyFlag("convert");
-        Console.WriteLine("-> " + outFileName);
+        // May be we need modification flag for each stage i.e., rename, media conversion and so on..
+        FileInfo.SetDirtyFlag("rename");
+        Console.WriteLine("   " + GetSimplifiedPath(FileInfo.Path) + ": " + FileInfo.ModInfo);
+        Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
 
       if (!ShouldSimulate && FileInfo.IsModified)
@@ -154,6 +155,8 @@ namespace ConsoleApp {
         return "";
       if (string.IsNullOrEmpty(year))
         year = match.Value.Substring(1, match.Value.Length - 2);
+      FileInfo.YearPosition = match.Index;
+      FileInfo.YearLength = match.Length;
       return year;
     }
 
@@ -167,14 +170,13 @@ namespace ConsoleApp {
     /// </summary>
     private string GetTitle()
     {
+      if (FileInfo.YearPosition < 3)
+        throw new ArgumentException("Wrong year position!");
       var fileName = GetSimplifiedPath(FileInfo.Path);
 
       // replace all the dots with space till that index
       var title = fileName.Substring(0, FileInfo.YearPosition).Replace('.', ' ');
       title = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(title);
-      // Console.WriteLine("match found at index: " + match.Index + " and extracted year " + year);
-      // Console.WriteLine("Title " + title);
-      // Console.WriteLine("Length of match " + match.Length);
       return title;
     }
 
@@ -209,7 +211,7 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(tail))
         return "";
       // drop first char, can be non dot
-      return '.' + tail.Substring(1);
+      return '.' + tail;
     }
 
     /// <summary>
@@ -217,28 +219,33 @@ namespace ConsoleApp {
     /// Set an action based on user choice and perform action to specified file
     /// </summary>
     private void ProcessFile(string filePath) {
-      Console.WriteLine("fpath " + filePath);
+
       if (string.IsNullOrEmpty(new DirectoryInfo(filePath).Extension) || IsSupportedExt(filePath,
         new DirectoryInfo(filePath).Extension.Substring(1)) == false) {
-        Console.WriteLine(" [Ignored] " + GetSimplifiedPath(filePath));
         return;
       }
       FileInfo.Init(filePath);
-      switch (Stage) {
-        case CONVERTSTAGE.ExtractArchive:
-          break;
-        case CONVERTSTAGE.RenameFile:
-          Rename();
-          break;
-        case CONVERTSTAGE.ConvertMedia:
-          break;
-        case CONVERTSTAGE.CreateArchive:
-          break;
-        default:
-          throw new InvalidOperationException("Invalid argument " + Stage + " to ProcessFile::switch");
-      }
+      if (!IsSingleStaged)
+        foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE)))
+        {
+          Stage = stage;
+          switch (Stage)
+          {
+            case CONVERTSTAGE.ExtractArchive:
+              break;
+            case CONVERTSTAGE.RenameFile:
+              Rename();
+              break;
+            case CONVERTSTAGE.ConvertMedia:
+              break;
+            case CONVERTSTAGE.CreateArchive:
+              break;
+            default:
+              throw new InvalidOperationException("Invalid argument " + Stage + " to ProcessFile::switch");
+          }
+        }
+
       if (FileInfo.IsModified) {
-        Console.WriteLine(" " + GetSimplifiedPath(FileInfo.Path) + ": " + FileInfo.ModInfo);
         ModifiedFileCount++;
         // if (!ShouldSimulate)
         //  FileInfo.WriteFile();
@@ -273,7 +280,6 @@ namespace ConsoleApp {
       if (sPath.Contains("\\"))
         throw new ArgumentException("RenameTitle requires simplified path (no '\\' in path), you" +
           " provided: '" + sPath + "'");
-      Console.WriteLine("sPath " + sPath);
       return sPath;
     }
 
@@ -306,22 +312,14 @@ namespace ConsoleApp {
     ///  https://stackoverflow.com/q/105372
     /// </summary>
     public void Run() {
-      // Console.WriteLine("Temporarily action convert = rename\n");
-
-      if (!IsSingleStaged)
-      foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE)))
+      Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + Path +
+        ", File list:" : "File:"));
+      if (IsDirectory)
       {
-        Stage = stage;
-        Console.WriteLine("Running action {0}\n---------------------------\n", stage);
-        Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + Path +
-          ", File list:" : "File:"));
-        if (IsDirectory)
-        {
-          ProcessDirectory(Path);
-        }
-        else
-          ProcessFile(Path);
+        ProcessDirectory(Path);
       }
+      else
+        ProcessFile(Path);
     }
   }
 }
