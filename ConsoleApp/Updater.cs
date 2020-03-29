@@ -177,9 +177,9 @@ namespace ConsoleApp {
     public async Task UpdateFFMpegAsync() {
       const int versionStringMaxLength = 20;
       var ffmpegGetOnlineStringTask = Task.Run(() => GetLatestFFMpegVersionAsync());
-      // at this point, runs fibo and timer concurrently
+      // at this point, GetLatestFFMpegVersion and the local version retrieval run concurrently
       var localVersion = GetLocalFFMpegVersion();
-      // now let's wait till timer finishes
+      // let's wait till GetLatestFFMpegVersion finishes
       var latestVersion = await ffmpegGetOnlineStringTask;
       if (localVersion == string.Empty || latestVersion == string.Empty || localVersion.Length >
         versionStringMaxLength || latestVersion.Length > versionStringMaxLength) {
@@ -299,7 +299,7 @@ namespace ConsoleApp {
       }
 
       /// <summary>
-      /// Send file to recycle bin.  Display dialog, display warning if files are too big to fit (FOF_WANTNUKEWARNING)
+      /// Send file to recycle bin. Display dialog, display warning if files are too big to fit (FOF_WANTNUKEWARNING)
       /// Used by <see cref="UpdateLocalFFMpeg"/>
       /// </summary>
       /// <param name="path">Location of directory or file to recycle</param>

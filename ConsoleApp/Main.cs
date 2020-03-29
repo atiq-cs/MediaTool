@@ -56,9 +56,9 @@ namespace ConsoleApp {
           Path = Action;
 
         // verify path, path is mandatory if action is not update
-        if ((Action != "update") && (string.IsNullOrEmpty(Path) || (!System.IO.File.Exists(Path) && !System.IO.Directory.
-          Exists(Path)))) {
-          Console.WriteLine("Invalid action or path specified!");
+        if (string.IsNullOrEmpty(Path) || (!System.IO.File.Exists(Path) && !System.IO.Directory.
+          Exists(Path))) {
+          Console.WriteLine("Given path is invalid!");
           return false;
         }
 
@@ -87,8 +87,7 @@ namespace ConsoleApp {
       else {
         var app = new MediaTool(options.Path.EndsWith(@"\") ? options.Path.Substring(0, options.Path.Length -
           1) : options.Path, options.Action != "convert", options.ShouldSimulate);
-        app.Run();
-        app.DisplaySummary();
+        await app.Run();
       }
     }
   }
