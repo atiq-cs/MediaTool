@@ -5,23 +5,25 @@ namespace ConsoleApp {
   using System;
   using System.IO;
   using System.Collections.Generic;
-
-  /// <summary>
-  /// Perform actions on Media Files
-  /// 
-  /// Documentation (requirements/features/design decisions) at
-  ///  https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
-  /// 
-  /// Examples at,
-  ///  https://github.com/atiq-cs/MediaTool/wiki/Command-Line-Arguments-Design
-  /// To keep the file uncluttered, debug statements are in
-  //    https://paper.dropbox.com/doc/Media-Tool-Debug-Statements--Av~lz37uTd4Np_PcJIHWlv2fAg-oLfBN5rCuojDp1GPHiXPB
-  /// </summary>
-  class MediaTool {
+  using System.Threading.Tasks;
+  using SharpCompress.Archives;
+  
+    /// <summary>
+    /// Perform actions on Media Files
+    /// 
+    /// Documentation (requirements/features/design decisions) at
+    ///  https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
+    /// 
+    /// Examples at,
+    ///  https://github.com/atiq-cs/MediaTool/wiki/Command-Line-Arguments-Design
+    /// To keep the file uncluttered, debug statements are in
+    //    https://paper.dropbox.com/doc/Media-Tool-Debug-Statements--Av~lz37uTd4Np_PcJIHWlv2fAg-oLfBN5rCuojDp1GPHiXPB
+    /// </summary>
+    class MediaTool {
     public enum CONVERTSTAGE {
       ExtractArchive,
       RenameFile,
-      ConvertMedia,   // sub still part of discussion
+      ExtractSubtitle,   // sub still part of discussion
       CreateArchive
     };
 
@@ -30,7 +32,7 @@ namespace ConsoleApp {
     /// Value being empty/null indicates an error state. Most methods should
     /// not be called in such error state
     /// </summary>
-    private string Path { get; set; }
+    private string MediaLocation { get; set; }
     private bool IsDirectory { get; set; }
 
     // States from CLA
@@ -50,6 +52,8 @@ namespace ConsoleApp {
     /// <remarks>
     /// This internal class should not be aware of outer cless details such as
     /// <c> ShouldSimulate </c>
+    /// Assertions
+    /// https://docs.microsoft.com/en-us/visualstudio/debugger/assertions-in-managed-code
     /// </remarks>  
     /// </summary>
     class FileInfoType {
@@ -66,9 +70,13 @@ namespace ConsoleApp {
         ModInfo = string.Empty;
       }
       public void SetDirtyFlag(string str) {
-        if (IsModified) { ModInfo += ", " + str; }
+        if (IsModified) {
+          if (! ModInfo.Contains(str))
+            ModInfo += ", " + str;
+        }
         else {
           IsModified = true;
+          System.Diagnostics.Debug.Assert(string.IsNullOrEmpty(ModInfo));
           ModInfo += str;
         }
       }
@@ -81,11 +89,11 @@ namespace ConsoleApp {
     /// <summary>
     /// Constructor: sets first 5 properties
     /// </summary>
-    public MediaTool(string Path, bool IsSingleStaged, bool shouldSimulate) {
+    public MediaTool(string path, bool isSingleStaged, bool shouldSimulate) {
       // Sets path member and directory flag
-      IsDirectory = File.Exists(Path) ? false : true;
-      this.Path = Path;
-      this.IsSingleStaged = IsSingleStaged;
+      IsDirectory = Directory.Exists(path);
+      this.MediaLocation = path;
+      this.IsSingleStaged = isSingleStaged;
       this.ShouldSimulate = shouldSimulate;
 
       // support srt for rename as well
@@ -99,22 +107,53 @@ namespace ConsoleApp {
       this.ShouldShowFFV = ShowFFMpegVersion;
     }
 
+    public bool ExtractRar() {
+      string filePath = FileInfo.Path;
+
+      if (! IsSupportedArchive(filePath, new DirectoryInfo(filePath).Extension.Substring(1)))
+        return false;
+
+      FileInfo.SetDirtyFlag("extract");
+
+      using (var archive = SharpCompress.Archives.Rar.RarArchive.Open(filePath)) {
+        foreach (var entry in archive.Entries) {
+          // simulation does not continue because file is not extracted
+          // extracting file during simulation: is it a good idea?
+          var parentPath = System.IO.Path.GetDirectoryName(FileInfo.Path);
+          FileInfo.Path = parentPath + "\\" + entry.Key;
+          if (!ShouldSimulate)
+          {
+            entry.WriteToDirectory(parentPath, new SharpCompress.Common.ExtractionOptions()
+            {
+              ExtractFullPath = true,
+              Overwrite = true
+            });
+          }
+          break;    // only get first item, for psa that's what we expect that much
+        }
+      }
+
+      return true;
+    }
+
     /// <summary>
     /// Renames media file
     /// <remarks>  </remarks>
     /// </summary>
-    /// <c>isBlockCommentStatusToggling</c>. Verifies output values
-    /// Right only verifies using our unique starting style and ending style, ensures there's a
-    /// comment line in between.
-    /// Later, may be verify if found block contains property as well.
-    /// </summary>
-    /// <param name="start"> start of result comment block</param>
-    /// <param name="end"> end of result comment block</param>
-    public void Rename() {
+    private void RenameFile() {
+      string filePath = FileInfo.Path;
+
+      // don't rename archives
+      if (IsSupportedArchive(filePath, new DirectoryInfo(filePath).Extension.Substring(1)))
+        return ;
+
       var year = GetYear();
       var title = GetTitle();
       var ripInfo = GetRipperInfo();
-      var outFileName = System.IO.Path.GetDirectoryName(FileInfo.Path) + '\\' + title + ' ' + year + ripInfo;
+
+      var outFileName = System.IO.Path.GetDirectoryName(FileInfo.Path) + '\\' + title + ' ' + year
+        + ripInfo;
+
       if (FileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
         FileInfo.SetDirtyFlag("rename");
@@ -127,10 +166,59 @@ namespace ConsoleApp {
     }
 
     /// <summary>
-    /// Converts to format ' (YYYY)'
-    /// as part of imdb style rename: ' (YYYY)'
+    /// Extract subrip caption from given media file
+    /// if only ass is found, convert it to srt using ffmpeg
+    /// <remarks>  </remarks>
+    /// <c>isBlockCommentStatusToggling</c>. example code block inline
+    /// Later, may be verify if found block contains property as well.
+    /// <param name="start"> start of result comment block</param>
+    /// <param name="end"> end of result comment block</param>
+    /// </summary>
+    private async Task ExtractSubRip() {
+      TaskCompletionSource<bool> eventHandled = new TaskCompletionSource<bool>();
+
+      // "D:\PFiles_x64\PT\ffmpeg\bin\ffmpeg.exe"
+      var ffmpegPath = @"D:\PFiles_x64\PT\ffmpeg\bin\ffprobe.exe";
+
+      using (System.Diagnostics.Process myProcess = new System.Diagnostics.Process
+      {  
+        StartInfo = { FileName = ffmpegPath, Arguments = "-i \""+ FileInfo.Path + "\""},
+        EnableRaisingEvents = true }
+      ) {
+        try {
+          // Start a process and raise an event when done.
+          // myProcess.Exited += new EventHandler(myProcess_Exited);
+          myProcess.Exited += (sender, args) =>
+          {
+            Console.WriteLine(
+                $"Exit time    : {myProcess.ExitTime}\n" +
+                $"Exit code    : {myProcess.ExitCode}\n" +
+                $"Elapsed time : " + Math.Round((myProcess.ExitTime - myProcess.StartTime).
+                TotalMilliseconds) + " ms");
+            eventHandled.TrySetResult(true);
+            myProcess.Dispose();
+          };
+
+          myProcess.Start();
+        }
+        catch (Exception ex) {
+          Console.WriteLine($"An error occurred trying to run ffmpeg \"{ffmpegPath}\":\n{ex.Message}");
+          return;
+        }
+
+        // Wait for Exited event, but not more than 30 seconds.
+        await Task.WhenAny(eventHandled.Task, Task.Delay(30000));
+      }
+    }
+
+
+    /// RenameFile Helper Methods Below
+    /// <summary>
+    /// Converts to format ' YYYY'
+    /// similar to imdb style rename: ' (YYYY)'; however, drop the parenthesis
+    ///
     /// <remarks> must need simplified path, validator is set to ensure this
-    /// Shares `FileInfo.YearPosition` & `YearLength` with GetTitlef & GetRipperInfo
+    /// Shares `FileInfo.YearPosition` & `YearLength` with GetTitle & GetRipperInfo
     /// </remarks>  
     /// </summary>
     private string GetYear() {
@@ -143,18 +231,22 @@ namespace ConsoleApp {
       // replace all the dots with space till that index
       var year = "";
       var match = System.Text.RegularExpressions.Regex.Match(fileName, @"(.|\,| )\(\d{4}\)(.|\,| )");
+
       // Init year info when `match.Success == false` we don't retain a previous state
       FileInfo.YearPosition = 0;
       FileInfo.YearLength = 0;
-      if (match.Success == false)
-        match = System.Text.RegularExpressions.Regex.Match(fileName, @"(.|,| )\d{4}(.|,| )");
-      else
-        year = match.Value.Substring(2, match.Value.Length - 4);
 
-      if (match.Success == false)
+      if (match.Success)
+        year = match.Value.Substring(2, match.Value.Length - 4);
+      else
+        match = System.Text.RegularExpressions.Regex.Match(fileName, @"(.|,| )\d{4}(.|,| )");
+
+      if (! match.Success)
         return "";
+
       if (string.IsNullOrEmpty(year))
         year = match.Value.Substring(1, match.Value.Length - 2);
+
       FileInfo.YearPosition = match.Index;
       FileInfo.YearLength = match.Length;
       return year;
@@ -166,7 +258,7 @@ namespace ConsoleApp {
     /// imdb style rename, applies the style on year too in format ' (YYYY)'
     /// <remarks> must need simplified path, validator is set to ensure this
     /// Shares `FileInfo.YearPosition` with GetRipperInfo
-    /// </remarks>  
+    /// </remarks>
     /// </summary>
     private string GetTitle()
     {
@@ -218,25 +310,29 @@ namespace ConsoleApp {
     /// ToDo: update for new design
     /// Set an action based on user choice and perform action to specified file
     /// </summary>
-    private void ProcessFile(string filePath) {
-
-      if (string.IsNullOrEmpty(new DirectoryInfo(filePath).Extension) || IsSupportedExt(filePath,
-        new DirectoryInfo(filePath).Extension.Substring(1)) == false) {
+    private async Task ProcessFile(string filePath) {
+      if (string.IsNullOrEmpty(new DirectoryInfo(filePath).Extension)) {
+        Console.WriteLine("File does not have an extension!");
         return;
       }
+
       FileInfo.Init(filePath);
+
       if (!IsSingleStaged)
-        foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE)))
-        {
+        foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE))) {
           Stage = stage;
-          switch (Stage)
-          {
+
+          bool isSuccess = true;
+          switch (Stage) {
             case CONVERTSTAGE.ExtractArchive:
+              isSuccess = ExtractRar();
               break;
             case CONVERTSTAGE.RenameFile:
-              Rename();
+              RenameFile();
               break;
-            case CONVERTSTAGE.ConvertMedia:
+            case CONVERTSTAGE.ExtractSubtitle:
+              if (!ShouldSimulate || (isSuccess && !FileInfo.ModInfo.Contains("extract")))
+                await ExtractSubRip();
               break;
             case CONVERTSTAGE.CreateArchive:
               break;
@@ -244,6 +340,7 @@ namespace ConsoleApp {
               throw new InvalidOperationException("Invalid argument " + Stage + " to ProcessFile::switch");
           }
         }
+
 
       if (FileInfo.IsModified) {
         ModifiedFileCount++;
@@ -260,6 +357,10 @@ namespace ConsoleApp {
       return SupportedExtList.Contains(extension);
     }
 
+    private bool IsSupportedArchive(string path, string extension = "") {
+      return (new HashSet<string>{ "rar", "tar", "zip" }).Contains(extension);
+    }
+
     /// <summary>
     /// <param name="FileInfo.Path">Path of source file</param>
     /// <remarks> Currently applies only to files; shouldn't be called from places like
@@ -271,38 +372,41 @@ namespace ConsoleApp {
     private string GetSimplifiedPath(string path) {
       if (string.IsNullOrEmpty(path))
         throw new ArgumentException("GetSimplifiedPath requires non-empty path!");
-      var dirPath = Path;
+
+      var dirPath = MediaLocation;
       if (IsDirectory == false)   // validation
         dirPath = (new FileInfo(path)).DirectoryName;
+
       var sPath = (path.Length > dirPath.Length && path.StartsWith(dirPath)) ? path.
           Substring(dirPath.Length + 1) : path;
+
       // file path validator, move to Unit Test, this validator also failing nested files/directories
       if (sPath.Contains("\\"))
-        throw new ArgumentException("RenameTitle requires simplified path (no '\\' in path), you" +
+        throw new ArgumentException("RenameTitle() requires simplified path (no '\\' in path), you" +
           " provided: '" + sPath + "'");
+
       return sPath;
     }
 
     /// <summary>
     /// Process provided directory (recurse)
     /// </summary>
-    private void ProcessDirectory(string dirPath) {
+    private async Task ProcessDirectory(string dirPath) {
       // Process the list of files found in the directory.
       string[] fileEntries = Directory.GetFiles(dirPath);
       foreach (string fileName in fileEntries)
-        ProcessFile(fileName);
+        await ProcessFile(fileName);
 
       // Recurse into subdirectories of this directory.
       string[] subdirectoryEntries = Directory.GetDirectories(dirPath);
       foreach (string subdirectory in subdirectoryEntries)
-        ProcessDirectory(subdirectory);
+        await ProcessDirectory(subdirectory);
     }
 
     public void DisplaySummary() {
       if (ShouldSimulate)
         Console.WriteLine("Simulated summary:");
       Console.WriteLine("Number of files modified: " + ModifiedFileCount);
-      Console.WriteLine("Following source file types covered:");
     }
 
     /// <summary>
@@ -311,15 +415,15 @@ namespace ConsoleApp {
     /// ref for enumeration,
     ///  https://stackoverflow.com/q/105372
     /// </summary>
-    public void Run() {
-      Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + Path +
+    public async Task Run() {
+      Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + MediaLocation +
         ", File list:" : "File:"));
       if (IsDirectory)
-      {
-        ProcessDirectory(Path);
-      }
+        await ProcessDirectory(MediaLocation);
       else
-        ProcessFile(Path);
+        await ProcessFile(MediaLocation);
+
+      DisplaySummary();
     }
   }
 }
