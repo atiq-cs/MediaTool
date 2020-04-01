@@ -8,18 +8,18 @@ namespace ConsoleApp {
   using System.Threading.Tasks;
   using SharpCompress.Archives;
   
-    /// <summary>
-    /// Perform actions on Media Files
-    /// 
-    /// Documentation (requirements/features/design decisions) at
-    ///  https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
-    /// 
-    /// Examples at,
-    ///  https://github.com/atiq-cs/MediaTool/wiki/Command-Line-Arguments-Design
-    /// To keep the file uncluttered, debug statements are in
-    //    https://paper.dropbox.com/doc/Media-Tool-Debug-Statements--Av~lz37uTd4Np_PcJIHWlv2fAg-oLfBN5rCuojDp1GPHiXPB
-    /// </summary>
-    class MediaTool {
+  /// <summary>
+  /// Perform actions on Media Files
+  /// 
+  /// Documentation (requirements/features/design decisions) at
+  ///  https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
+  /// 
+  /// Examples at,
+  ///  https://github.com/atiq-cs/MediaTool/wiki/Command-Line-Arguments-Design
+  /// To keep the file uncluttered, debug statements are in
+  //    https://paper.dropbox.com/doc/Media-Tool-Debug-Statements--Av~lz37uTd4Np_PcJIHWlv2fAg-oLfBN5rCuojDp1GPHiXPB
+  /// </summary>
+  class MediaTool {
     public enum CONVERTSTAGE {
       ExtractArchive,
       RenameFile,
@@ -33,7 +33,6 @@ namespace ConsoleApp {
     /// not be called in such error state
     /// </summary>
     private string MediaLocation { get; set; }
-    private bool IsDirectory { get; set; }
 
     // States from CLA
     private CONVERTSTAGE Stage { get; set; }
@@ -42,7 +41,7 @@ namespace ConsoleApp {
     private bool ShouldShowFFV { get; set; }
 
     // private HashSet<string> ExclusionDirList;
-    private HashSet<string> SupportedExtList;
+    // private HashSet<string> SupportedExtList;
 
     // Actions Summary Related
     private int ModifiedFileCount = 0;
@@ -58,6 +57,7 @@ namespace ConsoleApp {
     /// </summary>
     class FileInfoType {
       public string Path { get; set; }
+      public string Parent { get; set; }
       public bool IsModified { get; set; }
       public int YearPosition { get; set; }
       public int YearLength { get; set; }
@@ -65,6 +65,7 @@ namespace ConsoleApp {
 
       public void Init(string Path) {
         this.Path = Path;
+        this.Parent = System.IO.Path.GetDirectoryName(Path);
         IsModified = false;
         // Lines = null;
         ModInfo = string.Empty;
@@ -91,13 +92,11 @@ namespace ConsoleApp {
     /// </summary>
     public MediaTool(string path, bool isSingleStaged, bool shouldSimulate) {
       // Sets path member and directory flag
-      IsDirectory = Directory.Exists(path);
       this.MediaLocation = path;
       this.IsSingleStaged = isSingleStaged;
       this.ShouldSimulate = shouldSimulate;
 
-      // support srt for rename as well
-      SupportedExtList = new HashSet<string>() { "mp4", "mkv", "m4v", "srt" };
+      // SupportedExtList = new HashSet<string>() { "mp4", "mkv", "m4v" };
     }
 
     /// <summary>
@@ -107,10 +106,8 @@ namespace ConsoleApp {
       this.ShouldShowFFV = ShowFFMpegVersion;
     }
 
-    public bool ExtractRar() {
-      string filePath = FileInfo.Path;
-
-      if (! IsSupportedArchive(filePath, new DirectoryInfo(filePath).Extension.Substring(1)))
+    public bool ExtractRar(string filePath) {
+      if (! IsSupportedArchive(filePath))
         return false;
 
       FileInfo.SetDirtyFlag("extract");
@@ -119,11 +116,10 @@ namespace ConsoleApp {
         foreach (var entry in archive.Entries) {
           // simulation does not continue because file is not extracted
           // extracting file during simulation: is it a good idea?
-          var parentPath = System.IO.Path.GetDirectoryName(FileInfo.Path);
-          FileInfo.Path = parentPath + "\\" + entry.Key;
+          FileInfo.Path = FileInfo.Parent + "\\" + entry.Key;
           if (!ShouldSimulate)
           {
-            entry.WriteToDirectory(parentPath, new SharpCompress.Common.ExtractionOptions()
+            entry.WriteToDirectory(FileInfo.Parent, new SharpCompress.Common.ExtractionOptions()
             {
               ExtractFullPath = true,
               Overwrite = true
@@ -138,21 +134,21 @@ namespace ConsoleApp {
 
     /// <summary>
     /// Renames media file
-    /// <remarks>  </remarks>
+    /// <remarks> ExtractRar might have modified file name. Hence, don't pass `filePath` as param,
+    /// it should be retrieved from FileInfo </remarks>
     /// </summary>
     private void RenameFile() {
       string filePath = FileInfo.Path;
 
       // don't rename archives
-      if (IsSupportedArchive(filePath, new DirectoryInfo(filePath).Extension.Substring(1)))
+      if (IsSupportedArchive(filePath))
         return ;
 
       var year = GetYear();
       var title = GetTitle();
       var ripInfo = GetRipperInfo();
 
-      var outFileName = System.IO.Path.GetDirectoryName(FileInfo.Path) + '\\' + title + ' ' + year
-        + ripInfo;
+      var outFileName = FileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
 
       if (FileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
@@ -161,8 +157,11 @@ namespace ConsoleApp {
         Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
 
-      if (!ShouldSimulate && FileInfo.IsModified)
+      if (!ShouldSimulate && FileInfo.IsModified) {
         File.Move(FileInfo.Path, outFileName);
+        // Update file name so that next stage can pick it up
+        FileInfo.Path = outFileName;
+      }
     }
 
     /// <summary>
@@ -171,44 +170,160 @@ namespace ConsoleApp {
     /// <remarks>  </remarks>
     /// <c>isBlockCommentStatusToggling</c>. example code block inline
     /// Later, may be verify if found block contains property as well.
-    /// <param name="start"> start of result comment block</param>
-    /// <param name="end"> end of result comment block</param>
+    /// Don't pass `filePath` as param, it is updated by rename and should be retrieved from FileInfo
+    /// https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
     /// </summary>
     private async Task ExtractSubRip() {
-      TaskCompletionSource<bool> eventHandled = new TaskCompletionSource<bool>();
+      string filePath = FileInfo.Path;
+      // accept containers containing subrip: currently only mkv
+      if (! ContainerSupportsSub(filePath))
+        return ;
 
       // "D:\PFiles_x64\PT\ffmpeg\bin\ffmpeg.exe"
-      var ffmpegPath = @"D:\PFiles_x64\PT\ffmpeg\bin\ffprobe.exe";
+      var ffmpegPath = @"D:\PFiles_x64\PT\ffmpeg";
+      // var mediaInfo = FileInfo.Parent + @"\ffmpeg_media_info.log";
+      string ffprobeStr = "";
+      Console.WriteLine("Processing Media " + filePath + ":");
 
-      using (System.Diagnostics.Process myProcess = new System.Diagnostics.Process
-      {  
-        StartInfo = { FileName = ffmpegPath, Arguments = "-i \""+ FileInfo.Path + "\""},
+      using (System.Diagnostics.Process probeProcess = new System.Diagnostics.Process {
+        StartInfo = {
+          FileName = ffmpegPath + @"\bin\ffprobe.exe",
+          Arguments = "-i \""+ FileInfo.Path + "\"",
+          UseShellExecute = false,
+          RedirectStandardError = true
+        },
+        EnableRaisingEvents = true }
+      ) {
+        try {
+          probeProcess.Start();
+          ffprobeStr = probeProcess.StandardError.ReadToEnd();
+          // we are okay with blocking ffprobe since it takes
+          probeProcess.WaitForExit();
+          //Console.WriteLine("Received output: " + ffprobeStr);
+
+          if (string.IsNullOrEmpty(ffprobeStr)) {
+            probeProcess.Dispose();
+            throw new InvalidOperationException("Media Info (probe) is empty for provided media.");
+          }
+
+          if (probeProcess.ExitCode != 0) {
+            Console.WriteLine("Exit code: " + probeProcess.ExitCode + ", please check if it's corrupted file: " + filePath);
+            FileInfo.SetDirtyFlag("Fail: corrupted media file");
+          }
+          Console.WriteLine("Elapsed time : " + Math.Round((probeProcess.ExitTime - probeProcess.
+            StartTime).TotalMilliseconds) + " ms");
+          // $"Exit time    : {probeProcess.ExitTime}, " +
+
+          probeProcess.Dispose();
+        }
+        catch (Exception ex) {
+          Console.WriteLine($"An error occurred trying to run ffmpeg probe \"{ffmpegPath}\":\n{ex.Message}");
+          return;
+        }
+      }
+      // Wait for ffprobe process Exited event, but not more than 120 seconds
+      // await Task.WhenAny(eventHandled.Task, Task.Delay(120000));
+      if (string.IsNullOrEmpty(ffprobeStr))
+        return;
+
+      var sCodecId = ParseMediaInfo(ffprobeStr);
+
+      if (ShouldSimulate || (System.IO.Path.GetExtension(filePath).ToLower() != ".mkv"))
+        return;
+      // https://docs.microsoft.com/en-us/dotnet/api/system.io.path.getfilenamewithoutextension
+      var srtFilePath = FileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
+        + ".srt";
+      TaskCompletionSource<bool> ffmpegEventHandled = new TaskCompletionSource<bool>();
+
+      using (System.Diagnostics.Process ffmpegProcess = new System.Diagnostics.Process {
+        StartInfo = {
+          FileName = ffmpegPath + @"\bin\ffmpeg.exe",
+          Arguments = " -loglevel fatal -i \""+ FileInfo.Path + "\"" + " -codec:s srt -map " +
+            sCodecId + " \"" + srtFilePath + "\"",
+          UseShellExecute = false
+        },
         EnableRaisingEvents = true }
       ) {
         try {
           // Start a process and raise an event when done.
-          // myProcess.Exited += new EventHandler(myProcess_Exited);
-          myProcess.Exited += (sender, args) =>
-          {
-            Console.WriteLine(
-                $"Exit time    : {myProcess.ExitTime}\n" +
-                $"Exit code    : {myProcess.ExitCode}\n" +
-                $"Elapsed time : " + Math.Round((myProcess.ExitTime - myProcess.StartTime).
-                TotalMilliseconds) + " ms");
-            eventHandled.TrySetResult(true);
-            myProcess.Dispose();
+          ffmpegProcess.Exited += (sender, args) => {
+            if (ffmpegProcess.ExitCode != 0) {
+              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked ",
+                "incorrectly! Please check input stream. codec id: " + sCodecId);
+            }
+
+            Console.WriteLine("Elapsed time : " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
+              StartTime).TotalMilliseconds) + " ms");
+
+            ffmpegEventHandled.TrySetResult(true);
+            ffmpegProcess.Dispose();
           };
 
-          myProcess.Start();
+          ffmpegProcess.Start();
+          // better to utilize onExit than `WaitForExit`
         }
-        catch (Exception ex) {
-          Console.WriteLine($"An error occurred trying to run ffmpeg \"{ffmpegPath}\":\n{ex.Message}");
+        catch (Exception ex)
+        {
+          Console.WriteLine($"An error occurred trying to run ffmpeg scodec copy \"{ffmpegPath}\":\n{ex.Message}");
           return;
         }
 
-        // Wait for Exited event, but not more than 30 seconds.
-        await Task.WhenAny(eventHandled.Task, Task.Delay(30000));
+        // Wait for ffmpeg process Exited event, but not more than 120 seconds
+        await Task.WhenAny(ffmpegEventHandled.Task, Task.Delay(120000));
       }
+    }
+
+    private string ParseMediaInfo(string mediaInfoStr) {
+      string sCodeId = string.Empty;
+
+      var needle = "Input #0";
+      int start = mediaInfoStr.IndexOf(needle);
+      if (start == -1) {
+        Console.WriteLine("Container info not found, corrupted file?");
+        return sCodeId;
+      }
+
+      int prevNeedlePos = start + needle.Length;
+      needle = "from '";
+
+      if ((start = mediaInfoStr.IndexOf(needle, prevNeedlePos)) == -1) {
+        Console.WriteLine("Container info end needle not found!!");
+        return sCodeId;
+      }
+      Console.WriteLine("Container: " + mediaInfoStr.Substring(prevNeedlePos+2, start-prevNeedlePos-4));
+
+      // assuming container info wouldn't be less than 50, usually filled with metadata and chapter info
+      prevNeedlePos = start + needle.Length + 50;
+      needle = "Stream #0:";
+      var endNeedle = "Metadata:";
+      var streamEndNeedle = "_STATISTICS_WRITING_DATE";
+      Console.WriteLine("Streams found: ");
+
+      while ((start = mediaInfoStr.IndexOf(needle, prevNeedlePos)) != -1) {
+        prevNeedlePos = start + needle.Length;
+
+        if ((start = mediaInfoStr.IndexOf(endNeedle, prevNeedlePos + 2)) == -1) {
+          Console.WriteLine("Stream info line end needle not found!");
+          return sCodeId;
+        }
+
+        var streamInfo = mediaInfoStr.Substring(prevNeedlePos - 2, start - prevNeedlePos - 4);
+        Console.WriteLine(" " + streamInfo);
+        prevNeedlePos = start + endNeedle.Length;
+
+        if (streamInfo.Contains("Subtitle")) {
+          if ((start = mediaInfoStr.IndexOf(streamEndNeedle, prevNeedlePos + 2)) == -1)
+            Console.WriteLine("Stream info end needle not found!");
+          else {
+            Console.WriteLine(mediaInfoStr.Substring(prevNeedlePos+2, start-prevNeedlePos-10));
+            prevNeedlePos = start + streamEndNeedle.Length;
+          }
+        }
+      }
+      // sCodeId = mediaInfoStr.Substring(start, end - start);
+
+      return "0:2";
+      //return sCodeId;
     }
 
 
@@ -311,11 +426,14 @@ namespace ConsoleApp {
     /// Set an action based on user choice and perform action to specified file
     /// </summary>
     private async Task ProcessFile(string filePath) {
-      if (string.IsNullOrEmpty(new DirectoryInfo(filePath).Extension)) {
+      if (! System.IO.Path.HasExtension(filePath)) {
         Console.WriteLine("File does not have an extension!");
+        FileInfo.SetDirtyFlag("Fail: has no extension");
         return;
       }
 
+      // If verbose
+      // Console.WriteLine("Processing File " + filePath + ":");
       FileInfo.Init(filePath);
 
       if (!IsSingleStaged)
@@ -325,7 +443,7 @@ namespace ConsoleApp {
           bool isSuccess = true;
           switch (Stage) {
             case CONVERTSTAGE.ExtractArchive:
-              isSuccess = ExtractRar();
+              isSuccess = ExtractRar(filePath);
               break;
             case CONVERTSTAGE.RenameFile:
               RenameFile();
@@ -341,23 +459,24 @@ namespace ConsoleApp {
           }
         }
 
-
       if (FileInfo.IsModified) {
         ModifiedFileCount++;
-        // if (!ShouldSimulate)
-        //  FileInfo.WriteFile();
       }
     }
 
     /// <summary>
-    /// Check if directory qualifies to be in exclusion list
+    /// Original idea: check if directory qualifies to be in exclusion list
     /// Or if it is in extension list to be excluded for being a file
+    /// 
+    /// Currently return true for any media we might be interested in examining stream info
     /// </summary>
-    private bool IsSupportedExt(string path, string extension = "") {
-      return SupportedExtList.Contains(extension);
+    private bool ContainerSupportsSub(string path) {
+      string extension = System.IO.Path.GetExtension(path).Substring(1);
+      return (new HashSet<string> { "mp4", "mkv", "m4v", "wmv", "3gp", "m4a"}).Contains(extension);
     }
 
-    private bool IsSupportedArchive(string path, string extension = "") {
+    private bool IsSupportedArchive(string path) {
+      string extension = System.IO.Path.GetExtension(path).Substring(1);
       return (new HashSet<string>{ "rar", "tar", "zip" }).Contains(extension);
     }
 
@@ -373,10 +492,7 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(path))
         throw new ArgumentException("GetSimplifiedPath requires non-empty path!");
 
-      var dirPath = MediaLocation;
-      if (IsDirectory == false)   // validation
-        dirPath = (new FileInfo(path)).DirectoryName;
-
+      var dirPath = FileInfo.Parent;
       var sPath = (path.Length > dirPath.Length && path.StartsWith(dirPath)) ? path.
           Substring(dirPath.Length + 1) : path;
 
@@ -392,6 +508,8 @@ namespace ConsoleApp {
     /// Process provided directory (recurse)
     /// </summary>
     private async Task ProcessDirectory(string dirPath) {
+      Console.WriteLine("Processing Directory " + dirPath + ":");
+
       // Process the list of files found in the directory.
       string[] fileEntries = Directory.GetFiles(dirPath);
       foreach (string fileName in fileEntries)
@@ -416,9 +534,7 @@ namespace ConsoleApp {
     ///  https://stackoverflow.com/q/105372
     /// </summary>
     public async Task Run() {
-      Console.WriteLine("Processing " + (IsDirectory ? "Directory: " + MediaLocation +
-        ", File list:" : "File:"));
-      if (IsDirectory)
+      if (Directory.Exists(MediaLocation))
         await ProcessDirectory(MediaLocation);
       else
         await ProcessFile(MediaLocation);
