@@ -22,6 +22,7 @@ namespace ConsoleApp {
       }
 
       /// <summary>
+      /// ToDo: support verbose level: subtitle
       /// First argument is action or Path.
       /// If first argument was an action then second arg must be path (for now)
       /// If first argumet is update then second argument as ffmpeg path is optional
