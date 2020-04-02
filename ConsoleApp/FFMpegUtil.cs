@@ -16,17 +16,19 @@ namespace ConsoleApp {
     /// </remarks>
     /// </summary>
 
-    public FFMpegUtil(ref MediaTool.FileInfoType fileInfo) {
+    public FFMpegUtil(ref FileInfoType fileInfo) {
       FFMpegPath = @"D:\PFiles_x64\PT\ffmpeg";
-      this.FileInfo = fileInfo;
+      this.mFileInfo = fileInfo;
+      ShouldChangeContainer = true;
     }
 
-    private MediaTool.FileInfoType FileInfo;
+    private FileInfoType mFileInfo;
     private string FFMpegPath { get; set; }
+    private bool ShouldChangeContainer;
 
     internal async Task Run(bool ShouldSimulate = true)
     {
-      var filePath = FileInfo.Path;
+      var filePath = mFileInfo.Path;
       // var mediaInfo = FileInfo.Parent + @"\ffmpeg_media_info.log";
       Console.WriteLine("Processing Media " + filePath + ":");
 
@@ -38,6 +40,17 @@ namespace ConsoleApp {
 
       if (!string.IsNullOrEmpty(sCodecId))
         await ExtractSubtitle(filePath, sCodecId);
+
+      if (ShouldChangeContainer && ! mFileInfo.ModInfo.Contains("Fail")) { 
+        bool isSuccess = await ConvertMedia(filePath);
+        if (isSuccess) {
+          // remove the input mkv file
+
+          // update file path
+          mFileInfo.Path = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
+        + ".mp4";
+        }
+      }
     }
 
     private string GetMediaInfo(string filePath) {
@@ -67,7 +80,7 @@ namespace ConsoleApp {
           if (probeProcess.ExitCode != 0) {
             Console.WriteLine("Exit code: " + probeProcess.ExitCode + ", please check if it's corrupted file: " + filePath);
             // ToDo: pass FileInfo ** high pri this one
-            FileInfo.SetDirtyFlag("Fail: corrupted media file");
+            mFileInfo.SetDirtyFlag("Fail: corrupted media file");
           }
           Console.WriteLine("Elapsed time : " + Math.Round((probeProcess.ExitTime - probeProcess.
             StartTime).TotalMilliseconds) + " ms");
@@ -133,7 +146,7 @@ namespace ConsoleApp {
         // will throw IndexOutOfRangeException if result does not have 2
         var streamType = streamLine.Split(": ")[1];
         if (string.IsNullOrEmpty(streamLine) || string.IsNullOrEmpty(streamType)) {
-          FileInfo.SetDirtyFlag("Fail: unexpected input found");
+          mFileInfo.SetDirtyFlag("Fail: unexpected input found");
           return sCodeId;
         }
 
@@ -164,7 +177,7 @@ namespace ConsoleApp {
             break;
           default:
             // Todo
-            FileInfo.SetDirtyFlag("Fail: unknown stream found");
+            mFileInfo.SetDirtyFlag("Fail: unknown stream found");
             break;
         }
       }
@@ -173,15 +186,18 @@ namespace ConsoleApp {
 
       if (sCount == 0)
         Console.WriteLine("No subtitle found!");
-      else if (string.IsNullOrEmpty(sCodeId))
-        Console.WriteLine("Failed to choose subtitle index!");
+      else if (string.IsNullOrEmpty(sCodeId)) {
+        Console.WriteLine("Failed to choose subtitle index! Disabling container change..");
+        ShouldChangeContainer = false;
+      }
       else {
-        Console.WriteLine("sub index: " + sCodeId);
+        Console.WriteLine("Subtile stream index: " + sCodeId);
 
-        //if (aCount > 1)
+      if (aCount > 1) {
         // show warning, parse aCodec Id
-        // else
-        // set shouldChangeContainer to true
+        Console.WriteLine("Audio streams# " + aCount + "! Disabling container change..");
+        ShouldChangeContainer = false;
+        }
       }
 
       return sCodeId;
@@ -192,17 +208,18 @@ namespace ConsoleApp {
       // mkv, mp4, mpeg-2 m2ts, mov, qt can contain subtitles as attachments
       // ref, https://en.wikipedia.org/wiki/Comparison_of_video_container_formats
       // for now, for psa and rmz we only accept mkv
-      if (string.IsNullOrEmpty(sCodecId) || (System.IO.Path.GetExtension(filePath).ToLower() != ".mkv"))
+      if (System.IO.Path.GetExtension(filePath).ToLower() != ".mkv")
         return;
 
       // https://docs.microsoft.com/en-us/dotnet/api/system.io.path.getfilenamewithoutextension
-      var srtFilePath = FileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
+      var srtFilePath = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
         + ".srt";
       TaskCompletionSource<bool> ffmpegEventHandled = new TaskCompletionSource<bool>();
 
       using (System.Diagnostics.Process ffmpegProcess = new System.Diagnostics.Process {
         StartInfo = {
           FileName = FFMpegPath + @"\bin\ffmpeg.exe",
+          // -y overwrite output file if exists
           Arguments = " -loglevel fatal -i \""+ filePath + "\"" + " -codec:s srt -map " +
             sCodecId + " \"" + srtFilePath + "\"",
           UseShellExecute = false
@@ -228,9 +245,9 @@ namespace ConsoleApp {
           ffmpegProcess.Start();
           // better to utilize onExit than `WaitForExit`
         }
-        catch (Exception ex)
-        {
-          Console.WriteLine($"An error occurred trying to run ffmpeg scodec copy \"{FFMpegPath}\":\n{ex.Message}");
+        catch (Exception ex) {
+          Console.WriteLine($"An error occurred trying to run ffmpeg scodec copy \"{FFMpegPath}\"");
+          Console.WriteLine(ex.Message);
           return;
         }
 
@@ -239,7 +256,73 @@ namespace ConsoleApp {
       }
 
       // after extracting if it results a garbage subtitle (with sCount > 1) set shouldChangeContainer to false
-      // ToDo: Print sub file size
+      long srtSize = (new System.IO.FileInfo(srtFilePath)).Length;
+      Console.WriteLine("Srt size: {0:F2} KB", srtSize * 1.0 / 1024);
+
+      // Expecting at least 5 KB
+      if (srtSize < (5 * 1024))
+        ShouldChangeContainer = false;
+    }
+
+    private async Task<bool> ConvertMedia(string filePath) {
+      // for now, only convert mkv
+      if (System.IO.Path.GetExtension(filePath).ToLower() != ".mkv")
+        return false;
+
+      // https://docs.microsoft.com/en-us/dotnet/api/system.io.path.getfilenamewithoutextension
+      var mpegFilePath = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
+        + ".mp4";
+      TaskCompletionSource<bool> ffmpegEventHandled = new TaskCompletionSource<bool>();
+
+      using (System.Diagnostics.Process ffmpegProcess = new System.Diagnostics.Process {
+        StartInfo = {
+          FileName = FFMpegPath + @"\bin\ffmpeg.exe",
+          // ffmpeg remove menu chapters
+          // https://video.stackexchange.com/questions/20270/ffmpeg-delete-chapters
+          Arguments = " -loglevel fatal -i \""+ filePath + "\"" + " -sn -map_chapters -1 -codec:v copy -codec:a "
+            + "copy \"" + mpegFilePath + "\"",
+          UseShellExecute = false
+        },
+        EnableRaisingEvents = true }
+      ) {
+        try {
+          // Start a process and raise an event when done.
+          ffmpegProcess.Exited += (sender, args) => {
+            if (ffmpegProcess.ExitCode != 0) {
+              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked ",
+                "incorrectly! Please check input stream. args: " + ffmpegProcess.StartInfo.Arguments);
+              mFileInfo.SetDirtyFlag("Fail: media conversion");
+              return;
+            }
+
+            Console.WriteLine("Elapsed time : " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
+              StartTime).TotalMilliseconds) + " ms");
+
+            ffmpegEventHandled.TrySetResult(true);
+            ffmpegProcess.Dispose();
+          };
+
+          ffmpegProcess.Start();
+        }
+        catch (Exception ex) {
+          Console.WriteLine($"An error occurred trying to run ffmpeg scodec copy \"{FFMpegPath}\"");
+          Console.WriteLine(ex.Message);
+          return false;
+        }
+
+        long inSize = (new System.IO.FileInfo(filePath)).Length;
+
+        // Wait for ffmpeg process Exited event, but not more than 240 seconds
+        await Task.WhenAny(ffmpegEventHandled.Task, Task.Delay(240000));
+
+        // after extracting if it results a small file < 50 MB of original
+        long mpegSize = (new System.IO.FileInfo(mpegFilePath)).Length;
+
+        if ((inSize - mpegSize) > (50 * 1024 * 1024))
+          return false;
+      }
+
+      return true;
     }
   }
 }
