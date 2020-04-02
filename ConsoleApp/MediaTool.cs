@@ -45,47 +45,8 @@ namespace ConsoleApp {
 
     // Actions Summary Related
     private int ModifiedFileCount = 0;
-
-    /// <summary>
-    /// Props/methods related to single file processing
-    /// <remarks>
-    /// This internal class should not be aware of outer cless details such as
-    /// <c> ShouldSimulate </c>
-    /// Assertions
-    /// https://docs.microsoft.com/en-us/visualstudio/debugger/assertions-in-managed-code
-    /// </remarks>  
-    /// </summary>
-    public class FileInfoType {
-      public string Path { get; set; }
-      public string Parent { get; set; }
-      public bool IsModified { get; set; }
-      public int YearPosition { get; set; }
-      public int YearLength { get; set; }
-      // public string[] Lines { get; set; }
-
-      public void Init(string Path) {
-        this.Path = Path;
-        this.Parent = System.IO.Path.GetDirectoryName(Path);
-        IsModified = false;
-        // Lines = null;
-        ModInfo = string.Empty;
-      }
-      public void SetDirtyFlag(string str) {
-        if (IsModified) {
-          if (! ModInfo.Contains(str))
-            ModInfo += ", " + str;
-        }
-        else {
-          IsModified = true;
-          System.Diagnostics.Debug.Assert(string.IsNullOrEmpty(ModInfo));
-          ModInfo += str;
-        }
-      }
-
-      // list of actions being performed in the file
-      public string ModInfo { get; set; }
-    }
-    internal FileInfoType FileInfo = new FileInfoType();
+    // FileInfo for our media files
+    internal FileInfoType mFileInfo = new FileInfoType();
 
     /// <summary>
     /// Constructor: sets first 5 properties
@@ -110,16 +71,16 @@ namespace ConsoleApp {
       if (! IsSupportedArchive(filePath))
         return false;
 
-      FileInfo.SetDirtyFlag("extract");
+      mFileInfo.SetDirtyFlag("extract");
 
       using (var archive = SharpCompress.Archives.Rar.RarArchive.Open(filePath)) {
         foreach (var entry in archive.Entries) {
           // simulation does not continue because file is not extracted
           // extracting file during simulation: is it a good idea?
-          FileInfo.Path = FileInfo.Parent + "\\" + entry.Key;
+          mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
           if (!ShouldSimulate)
           {
-            entry.WriteToDirectory(FileInfo.Parent, new SharpCompress.Common.ExtractionOptions()
+            entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions()
             {
               ExtractFullPath = true,
               Overwrite = true
@@ -138,7 +99,7 @@ namespace ConsoleApp {
     /// it should be retrieved from FileInfo </remarks>
     /// </summary>
     private void RenameFile() {
-      string filePath = FileInfo.Path;
+      string filePath = mFileInfo.Path;
 
       // don't rename archives
       if (IsSupportedArchive(filePath))
@@ -148,19 +109,19 @@ namespace ConsoleApp {
       var title = GetTitle();
       var ripInfo = GetRipperInfo();
 
-      var outFileName = FileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
+      var outFileName = mFileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
 
-      if (FileInfo.Path != outFileName) {
+      if (mFileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
-        FileInfo.SetDirtyFlag("rename");
-        Console.WriteLine("   " + GetSimplifiedPath(FileInfo.Path) + ": " + FileInfo.ModInfo);
+        mFileInfo.SetDirtyFlag("rename");
+        Console.WriteLine("   " + GetSimplifiedPath(mFileInfo.Path) + ": " + mFileInfo.ModInfo);
         Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
 
-      if (!ShouldSimulate && FileInfo.IsModified) {
-        File.Move(FileInfo.Path, outFileName);
+      if (!ShouldSimulate && mFileInfo.IsModified) {
+        File.Move(mFileInfo.Path, outFileName);
         // Update file name so that next stage can pick it up
-        FileInfo.Path = outFileName;
+        mFileInfo.Path = outFileName;
       }
     }
 
@@ -188,7 +149,7 @@ namespace ConsoleApp {
     /// </remarks>  
     /// </summary>
     private string GetYear() {
-      var fileName = GetSimplifiedPath(FileInfo.Path);
+      var fileName = GetSimplifiedPath(mFileInfo.Path);
 
       // find index of Year of the movie
       // 3 types: 1. .YYYY. 2.  YYYY  3. (YYYY)
@@ -199,8 +160,8 @@ namespace ConsoleApp {
       var match = System.Text.RegularExpressions.Regex.Match(fileName, @"(.|\,| )\(\d{4}\)(.|\,| )");
 
       // Init year info when `match.Success == false` we don't retain a previous state
-      FileInfo.YearPosition = 0;
-      FileInfo.YearLength = 0;
+      mFileInfo.YearPosition = 0;
+      mFileInfo.YearLength = 0;
 
       if (match.Success)
         year = match.Value.Substring(2, match.Value.Length - 4);
@@ -213,8 +174,8 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(year))
         year = match.Value.Substring(1, match.Value.Length - 2);
 
-      FileInfo.YearPosition = match.Index;
-      FileInfo.YearLength = match.Length;
+      mFileInfo.YearPosition = match.Index;
+      mFileInfo.YearLength = match.Length;
       return year;
     }
 
@@ -228,12 +189,12 @@ namespace ConsoleApp {
     /// </summary>
     private string GetTitle()
     {
-      if (FileInfo.YearPosition < 3)
+      if (mFileInfo.YearPosition < 3)
         throw new ArgumentException("Wrong year position!");
-      var fileName = GetSimplifiedPath(FileInfo.Path);
+      var fileName = GetSimplifiedPath(mFileInfo.Path);
 
       // replace all the dots with space till that index
-      var title = fileName.Substring(0, FileInfo.YearPosition).Replace('.', ' ');
+      var title = fileName.Substring(0, mFileInfo.YearPosition).Replace('.', ' ');
       title = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(title);
       return title;
     }
@@ -246,8 +207,8 @@ namespace ConsoleApp {
     /// </summary>
     private string GetRipperInfo()
     {
-      var fileName = GetSimplifiedPath(FileInfo.Path);
-      var tail = fileName.Substring(FileInfo.YearPosition + FileInfo.YearLength);
+      var fileName = GetSimplifiedPath(mFileInfo.Path);
+      var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
       // apply ripper patterns
       // psa
       tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "Br.psa");
@@ -279,13 +240,13 @@ namespace ConsoleApp {
     private async Task ProcessFile(string filePath) {
       if (! System.IO.Path.HasExtension(filePath)) {
         Console.WriteLine("File does not have an extension!");
-        FileInfo.SetDirtyFlag("Fail: has no extension");
+        mFileInfo.SetDirtyFlag("Fail: has no extension");
         return;
       }
 
       // If verbose
       // Console.WriteLine("Processing File " + filePath + ":");
-      FileInfo.Init(filePath);
+      mFileInfo.Init(filePath);
 
       if (!IsSingleStaged)
         foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE))) {
@@ -300,10 +261,10 @@ namespace ConsoleApp {
               RenameFile();
               break;
             case CONVERTSTAGE.ExtractSubtitle:
-              if (!ShouldSimulate || (isSuccess && !FileInfo.ModInfo.Contains("extract"))) {
+              if (!ShouldSimulate || (isSuccess && !mFileInfo.ModInfo.Contains("extract"))) {
                 // accept containers containing subrip: currently only mkv
-                if (IsSupportedMedia(FileInfo.Path)) {
-                  var extractSub = new FFMpegUtil(ref FileInfo);
+                if (IsSupportedMedia(mFileInfo.Path)) {
+                  var extractSub = new FFMpegUtil(ref mFileInfo);
                   await extractSub.Run(ShouldSimulate);
                 }
               }
@@ -315,7 +276,7 @@ namespace ConsoleApp {
           }
         }
 
-      if (FileInfo.IsModified) {
+      if (mFileInfo.IsModified) {
         ModifiedFileCount++;
       }
     }
@@ -348,7 +309,7 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(path))
         throw new ArgumentException("GetSimplifiedPath requires non-empty path!");
 
-      var dirPath = FileInfo.Parent;
+      var dirPath = mFileInfo.Parent;
       var sPath = (path.Length > dirPath.Length && path.StartsWith(dirPath)) ? path.
           Substring(dirPath.Length + 1) : path;
 

@@ -69,6 +69,10 @@ namespace ConsoleApp {
 
         if (arguments[arguments.Length - 1] == "simulate")
           ShouldSimulate = true;
+        else if (claIndex < arguments.Length) {
+          Console.WriteLine("Last argument is invalid!");
+          return false;
+        }
         return true;
       }
     }
