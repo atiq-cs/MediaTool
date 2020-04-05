@@ -67,7 +67,7 @@ namespace ConsoleApp {
         if (string.IsNullOrEmpty(Action))
           Action = "convert";
 
-        if (arguments[arguments.Length - 1] == "simulate")
+        if (arguments[arguments.Length - 1] == "sim" || arguments[arguments.Length - 1] == "simulate")
           ShouldSimulate = true;
         else if (claIndex < arguments.Length) {
           Console.WriteLine("Last argument is invalid!");

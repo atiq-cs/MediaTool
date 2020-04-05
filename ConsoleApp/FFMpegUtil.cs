@@ -5,9 +5,7 @@ using System;
 using System.Threading.Tasks;
 
 namespace ConsoleApp {
-  internal class FFMpegUtil
-  {
-
+  internal class FFMpegUtil {
     /// <summary>
     /// Props/methods related to single file processing
     /// <remarks>
@@ -32,7 +30,7 @@ namespace ConsoleApp {
       // var mediaInfo = FileInfo.Parent + @"\ffmpeg_media_info.log";
       Console.WriteLine("Processing Media " + filePath + ":");
 
-      string ffprobeStr = GetMediaInfo(filePath);
+      string ffprobeStr = await GetMediaInfo(filePath);
       var sCodecId = ParseMediaInfo(ffprobeStr);
 
       if (ShouldSimulate)
@@ -41,19 +39,30 @@ namespace ConsoleApp {
       if (!string.IsNullOrEmpty(sCodecId))
         await ExtractSubtitle(filePath, sCodecId);
 
-      if (ShouldChangeContainer && ! mFileInfo.ModInfo.Contains("Fail")) { 
+      if (ShouldChangeContainer && ! mFileInfo.ModInfo.Contains("Fail")) {
+        // ConvertMedia has a high elapsed time, take advantage of async: do tasks before await inside
         bool isSuccess = await ConvertMedia(filePath);
         if (isSuccess) {
           // remove the input mkv file
+          FileOperationAPIWrapper.Send(filePath);
 
           // update file path
-          mFileInfo.Path = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
-        + ".mp4";
+          mFileInfo.Path = mFileInfo.Parent + "\\" +
+            System.IO.Path.GetFileNameWithoutExtension(filePath) + ".mp4";
+          mFileInfo.SetDirtyFlag("convert");
+
+          if (!ShouldSimulate && !mFileInfo.ModInfo.Contains("Fail")) { 
+            // show how output looks like
+            Console.WriteLine();
+            ffprobeStr = await GetMediaInfo(mFileInfo.Path);
+            sCodecId = ParseMediaInfo(ffprobeStr);
+            System.Diagnostics.Debug.Assert(string.IsNullOrEmpty(sCodecId));
+          }
         }
       }
     }
 
-    private string GetMediaInfo(string filePath) {
+    private async Task<string> GetMediaInfo(string filePath) {
       string ffprobeStr = string.Empty;
 
       using (System.Diagnostics.Process probeProcess = new System.Diagnostics.Process {
@@ -66,35 +75,44 @@ namespace ConsoleApp {
         EnableRaisingEvents = true }
       ) {
         try {
+          TaskCompletionSource<bool> probeEventHandled = new TaskCompletionSource<bool>();
+
+          // Start a process and raise an event when done.
+          // accessing variables inside this event i.e., ffprobeStr or ReadToEnd will create deadlock
+          probeProcess.Exited += (sender, args) => {
+            if (probeProcess.ExitCode != 0) {
+              Console.WriteLine("Exit code: " + probeProcess.ExitCode + ", please check if it's corrupted file: " + filePath);
+              // ToDo: pass FileInfo ** high pri this one
+              mFileInfo.SetDirtyFlag("Fail: corrupted media file");
+            }
+
+            Console.WriteLine("Elapsed time: " + Math.Round((probeProcess.ExitTime - probeProcess.
+              StartTime).TotalMilliseconds) + " ms");
+            // $"Exit time    : {probeProcess.ExitTime}, " +
+
+            probeEventHandled.TrySetResult(true);
+            probeProcess.Dispose();
+          };
+
           probeProcess.Start();
           ffprobeStr = probeProcess.StandardError.ReadToEnd();
-          // we are okay with blocking ffprobe since it takes
-          probeProcess.WaitForExit();
-          //Console.WriteLine("Received output: " + ffprobeStr);
+          // Blocking start process example
+          // probeProcess.WaitForExit();
+          // Console.WriteLine("Received output: " + ffprobeStr);
 
-          if (string.IsNullOrEmpty(ffprobeStr)) {
-            probeProcess.Dispose();
-            throw new InvalidOperationException("Media Info (probe) is empty for provided media.");
-          }
-
-          if (probeProcess.ExitCode != 0) {
-            Console.WriteLine("Exit code: " + probeProcess.ExitCode + ", please check if it's corrupted file: " + filePath);
-            // ToDo: pass FileInfo ** high pri this one
-            mFileInfo.SetDirtyFlag("Fail: corrupted media file");
-          }
-          Console.WriteLine("Elapsed time : " + Math.Round((probeProcess.ExitTime - probeProcess.
-            StartTime).TotalMilliseconds) + " ms");
-          // $"Exit time    : {probeProcess.ExitTime}, " +
-
-          probeProcess.Dispose();
+          // Wait for ffProbe process Exited event, but not more than 10 seconds
+          await Task.WhenAny(probeEventHandled.Task, Task.Delay(10000));
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) {
           Console.WriteLine($"An error occurred trying to run ffmpeg probe \"{FFMpegPath}\":\n{ex.Message}");
           return ffprobeStr;
         }
-      }
 
+        if (string.IsNullOrEmpty(ffprobeStr)) {
+          probeProcess.Dispose();
+          throw new InvalidOperationException("Media Info (probe) is empty for provided media.");
+        }
+      }
       return ffprobeStr;
     }
 
@@ -119,12 +137,14 @@ namespace ConsoleApp {
         Console.WriteLine("Container info end needle not found!!");
         return sCodeId;
       }
-      Console.WriteLine("Container: " + mediaInfoStr.Substring(prevNeedlePos + 2, start - prevNeedlePos - 4));
+      Console.WriteLine("Container: " + mediaInfoStr.Substring(prevNeedlePos+2, start -
+        prevNeedlePos-4));
 
       // assuming container info wouldn't be less than 50, usually filled with metadata and chapter info
       prevNeedlePos = start + needle.Length + 50;
       var lineNeedle = "Stream #0:";
       var lineEndNeedle = "Metadata:";
+      var langTitleNeedle = "title";
       var streamEndNeedle = "_STATISTICS_WRITING_DATE";
       Console.WriteLine("Streams found: ");
 
@@ -133,8 +153,7 @@ namespace ConsoleApp {
       while ((start = mediaInfoStr.IndexOf(lineNeedle, prevNeedlePos)) != -1) {
         prevNeedlePos = start + lineNeedle.Length;
 
-        if ((start = mediaInfoStr.IndexOf(lineEndNeedle, prevNeedlePos + 2)) == -1)
-        {
+        if ((start = mediaInfoStr.IndexOf(lineEndNeedle, prevNeedlePos + 2)) == -1) {
           Console.WriteLine("Stream info line end needle not found!");
           return sCodeId;
         }
@@ -150,8 +169,7 @@ namespace ConsoleApp {
           return sCodeId;
         }
 
-        switch (streamType)
-        {
+        switch (streamType) {
           case "Subtitle":
             // set s codec id
             // (eng) ... (default)
@@ -161,7 +179,7 @@ namespace ConsoleApp {
             else if (streamLine.Contains("(eng)") && string.IsNullOrEmpty(sCodeId))
               sCodeId = "0:" + streamLine.Split(new Char[] { ':', '(' })[1];
 
-            // Metadata (Title, BPS etc) info show for verbosity
+            // Metadata (Title, BPS etc) info show only Title for verbosity
             if ((start = mediaInfoStr.IndexOf(streamEndNeedle, prevNeedlePos + 2)) == -1)
               Console.WriteLine("Stream info end needle not found!");
             else {
@@ -170,10 +188,14 @@ namespace ConsoleApp {
             }
             sCount++;
             break;
+
           case "Audio":
             aCount++;
             break;
           case "Video":
+            break;
+          case "Data":
+            Console.WriteLine("Stream Data found: is input an mp4 file?");
             break;
           default:
             // Todo
@@ -182,16 +204,16 @@ namespace ConsoleApp {
         }
       }
 
-      Console.WriteLine("Nmber of subtitle streams: " + sCount + ", nmber of audio: " + aCount);
+      Console.WriteLine("Nmber of subtitles: " + sCount + ", nmber of audio: " + aCount);
 
-      if (sCount == 0)
-        Console.WriteLine("No subtitle found!");
-      else if (string.IsNullOrEmpty(sCodeId)) {
-        Console.WriteLine("Failed to choose subtitle index! Disabling container change..");
-        ShouldChangeContainer = false;
+      if (sCount > 0) {
+        if (string.IsNullOrEmpty(sCodeId)) {
+          Console.WriteLine("Failed to choose subtitle index! Disabling container change..");
+          ShouldChangeContainer = false;
+        }
+        else {
+          Console.WriteLine("Subtile stream index: " + sCodeId);
       }
-      else {
-        Console.WriteLine("Subtile stream index: " + sCodeId);
 
       if (aCount > 1) {
         // show warning, parse aCodec Id
@@ -229,14 +251,13 @@ namespace ConsoleApp {
         try {
           // Start a process and raise an event when done.
           ffmpegProcess.Exited += (sender, args) => {
-            if (ffmpegProcess.ExitCode != 0)
-            {
-              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked ",
-                "incorrectly! Please check input stream. codec id: " + sCodecId);
+            if (ffmpegProcess.ExitCode != 0) {
+              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", an overwrite is not" +
+                "confirmed or ffmpeg is invoked incorrectly! Please check input stream. codec id: " + sCodecId);
             }
 
-            Console.WriteLine("Elapsed time : " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
-              StartTime).TotalMilliseconds) + " ms");
+            Console.Write("Subtitle extraction time: " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
+              StartTime).TotalMilliseconds) + " ms (), ");
 
             ffmpegEventHandled.TrySetResult(true);
             ffmpegProcess.Dispose();
@@ -251,6 +272,10 @@ namespace ConsoleApp {
           return;
         }
 
+        // Run Concurrent
+        // Cleanup garbage sub
+        // Change sponsor text in psarip subs
+
         // Wait for ffmpeg process Exited event, but not more than 120 seconds
         await Task.WhenAny(ffmpegEventHandled.Task, Task.Delay(120000));
       }
@@ -259,9 +284,11 @@ namespace ConsoleApp {
       long srtSize = (new System.IO.FileInfo(srtFilePath)).Length;
       Console.WriteLine("Srt size: {0:F2} KB", srtSize * 1.0 / 1024);
 
-      // Expecting at least 5 KB
-      if (srtSize < (5 * 1024))
-        ShouldChangeContainer = false;
+      // Expecting at least 5 KB; if found less notify, but don't affect cont. change
+      if (srtSize < (5 * 1024)) {
+        Console.WriteLine("Subtitle file size is small (< 5 KB)!");
+        // ShouldChangeContainer = false;
+      }
     }
 
     private async Task<bool> ConvertMedia(string filePath) {
@@ -289,14 +316,14 @@ namespace ConsoleApp {
           // Start a process and raise an event when done.
           ffmpegProcess.Exited += (sender, args) => {
             if (ffmpegProcess.ExitCode != 0) {
-              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked ",
+              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked " +
                 "incorrectly! Please check input stream. args: " + ffmpegProcess.StartInfo.Arguments);
               mFileInfo.SetDirtyFlag("Fail: media conversion");
               return;
             }
 
-            Console.WriteLine("Elapsed time : " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
-              StartTime).TotalMilliseconds) + " ms");
+            Console.WriteLine("Elapsed time: " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
+              StartTime).TotalMilliseconds) + " ms (change to mp4 container");
 
             ffmpegEventHandled.TrySetResult(true);
             ffmpegProcess.Dispose();
@@ -312,8 +339,8 @@ namespace ConsoleApp {
 
         long inSize = (new System.IO.FileInfo(filePath)).Length;
 
-        // Wait for ffmpeg process Exited event, but not more than 240 seconds
-        await Task.WhenAny(ffmpegEventHandled.Task, Task.Delay(240000));
+        // Wait for ffmpeg process Exited event, but not more than 40 seconds
+        await Task.WhenAny(ffmpegEventHandled.Task, Task.Delay(40000));
 
         // after extracting if it results a small file < 50 MB of original
         long mpegSize = (new System.IO.FileInfo(mpegFilePath)).Length;
