@@ -74,21 +74,46 @@ namespace ConsoleApp {
       mFileInfo.SetDirtyFlag("extract");
 
       using (var archive = SharpCompress.Archives.Rar.RarArchive.Open(filePath)) {
-        foreach (var entry in archive.Entries) {
-          // simulation does not continue because file is not extracted
-          // extracting file during simulation: is it a good idea?
-          mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
-          if (!ShouldSimulate)
-          {
-            entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions()
+        // archive not null when next archive is not found 
+        try {
+          foreach (var entry in archive.Entries) {
+            // simulation does not continue because file is not extracted
+            // extracting file during simulation: is it a good idea?
+            mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
+
+            if (!ShouldSimulate)
             {
-              ExtractFullPath = true,
-              Overwrite = true
-            });
+              entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions() {
+                ExtractFullPath = true,
+                Overwrite = true }
+              );
+            }
+            break;    // only get first item, for psa that's what we expect that much
           }
-          break;    // only get first item, for psa that's what we expect that much
+        }
+        catch (System.ArgumentException e) {
+          Console.WriteLine("Probably could not find next archive! Msg:\r\n" + e.Message);
+          return false;
         }
       }
+
+      // remove processed Rar Archive/s
+      var tail = "part1.rar";
+
+      if (filePath.EndsWith(tail, StringComparison.CurrentCultureIgnoreCase)) {
+        // Only get files that begin with the letter "c".
+        string sPath = GetSimplifiedPath(filePath);
+        var pattern = sPath.Substring(0, sPath.Length - tail.Length) + "part*.rar";
+        Console.WriteLine("Rar find pattern: " + pattern);
+        string[] rarFiles = Directory.GetFiles(mFileInfo.Parent, pattern);
+        foreach (string rarFile in rarFiles) {
+          Console.WriteLine("Removing file: " + rarFile);
+          if (!ShouldSimulate)
+            FileOperationAPIWrapper.Send(rarFile);
+        }
+      }
+      else if (!ShouldSimulate)
+        FileOperationAPIWrapper.Send(filePath);
 
       return true;
     }
@@ -102,7 +127,7 @@ namespace ConsoleApp {
       string filePath = mFileInfo.Path;
 
       // don't rename archives
-      if (IsSupportedArchive(filePath))
+      if (IsSupportedArchive(filePath, false))
         return ;
 
       var year = GetYear();
@@ -119,6 +144,9 @@ namespace ConsoleApp {
       }
 
       if (!ShouldSimulate && mFileInfo.IsModified) {
+        // check if file already exists before rename, send to recycle bin if exists :)
+        if (File.Exists(outFileName))
+          FileOperationAPIWrapper.Send(outFileName);
         File.Move(mFileInfo.Path, outFileName);
         // Update file name so that next stage can pick it up
         mFileInfo.Path = outFileName;
@@ -205,8 +233,8 @@ namespace ConsoleApp {
     /// 
     /// It would be probably a good idea to make the rules dynamic: move to a file
     /// </summary>
-    private string GetRipperInfo()
-    {
+    private string GetRipperInfo() {
+      // read these mapping from config file
       var fileName = GetSimplifiedPath(mFileInfo.Path);
       var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
       // apply ripper patterns
@@ -214,7 +242,7 @@ namespace ConsoleApp {
       tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "Br.psa");
       tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "Br.psa");
       tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "Br.10.6.psa");
-      // found 'INTERNAL' with psa with 2019 Movie
+      // found 'INTERNAL' with psa; 2019 Movie
       tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "Br.psa");
       // see if really BrRip is found in original string
       tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080p.Br.6.psa");
@@ -223,10 +251,11 @@ namespace ConsoleApp {
       tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.psa");
       tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10.6.psa");
       // RMTeam
-      tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "Br.RMTeam");
-      tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "Br.RMTeam");
+      tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "rem.Br.rmt");
+      tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "Br.rmt");
       // RMTeam 1080p
-      tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080p.Br.RMTeam");
+      tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080p.Br.rmt");
+
       if (string.IsNullOrEmpty(tail))
         return "";
       // drop first char, can be non dot
@@ -248,6 +277,7 @@ namespace ConsoleApp {
       // Console.WriteLine("Processing File " + filePath + ":");
       mFileInfo.Init(filePath);
 
+      // we don't need this var: IsSingleStaged anymore
       if (!IsSingleStaged)
         foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE))) {
           Stage = stage;
@@ -276,9 +306,9 @@ namespace ConsoleApp {
           }
         }
 
-      if (mFileInfo.IsModified) {
+
+      if (mFileInfo.IsModified)
         ModifiedFileCount++;
-      }
     }
 
     /// <summary>
@@ -292,7 +322,22 @@ namespace ConsoleApp {
       return (new HashSet<string> { "mp4", "mkv", "m4v", "wmv", "3gp", "m4a"}).Contains(extension);
     }
 
-    private bool IsSupportedArchive(string path) {
+
+    /// <summary>
+    /// FIles with name like movie-partddd.rar will still fail
+    /// We only check upto 2 digits
+    /// </summary>
+    private bool IsSupportedArchive(string path, bool extractPurpose = true) {
+      if (extractPurpose) {
+        string pattern1 = @"part\d{1}\.rar$";
+        string pattern2 = @"part\d{2}\.rar$";
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(path, pattern1, System.Text.RegularExpressions.
+          RegexOptions.IgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(path, pattern2,
+          System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
+          return path.EndsWith("part1.rar", StringComparison.CurrentCultureIgnoreCase);
+        }
+      }
       string extension = System.IO.Path.GetExtension(path).Substring(1);
       return (new HashSet<string>{ "rar", "tar", "zip" }).Contains(extension);
     }
@@ -341,7 +386,7 @@ namespace ConsoleApp {
     public void DisplaySummary() {
       if (ShouldSimulate)
         Console.WriteLine("Simulated summary:");
-      Console.WriteLine("Processed file# " + ModifiedFileCount);
+      Console.WriteLine("Processed files# " + ModifiedFileCount);
       // ToDo
       //Console.WriteLine("Failed# " + ModifiedFileCount);
     }
