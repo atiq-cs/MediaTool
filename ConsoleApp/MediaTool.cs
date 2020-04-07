@@ -67,6 +67,13 @@ namespace ConsoleApp {
       this.ShouldShowFFV = ShowFFMpegVersion;
     }
 
+    /// <summary>
+    /// Extract Rar Archives and clean up
+    /// 
+    /// https://docs.microsoft.com/en-us/dotnet/api/system.io.directory.getfiles
+    /// </summary>
+    /// <param name="filePath"></param>
+    /// <returns></returns>
     public bool ExtractRar(string filePath) {
       if (! IsSupportedArchive(filePath))
         return false;
@@ -81,8 +88,7 @@ namespace ConsoleApp {
             // extracting file during simulation: is it a good idea?
             mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
 
-            if (!ShouldSimulate)
-            {
+            if (!ShouldSimulate) {
               entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions() {
                 ExtractFullPath = true,
                 Overwrite = true }
@@ -105,9 +111,12 @@ namespace ConsoleApp {
         string sPath = GetSimplifiedPath(filePath);
         var pattern = sPath.Substring(0, sPath.Length - tail.Length) + "part*.rar";
         Console.WriteLine("Rar find pattern: " + pattern);
+
         string[] rarFiles = Directory.GetFiles(mFileInfo.Parent, pattern);
+
         foreach (string rarFile in rarFiles) {
           Console.WriteLine("Removing file: " + rarFile);
+
           if (!ShouldSimulate)
             FileOperationAPIWrapper.Send(rarFile);
         }
@@ -232,6 +241,9 @@ namespace ConsoleApp {
     /// Br.10.6.psa = 720p.BrRip.10bit.6ch.psarip
     /// 
     /// It would be probably a good idea to make the rules dynamic: move to a file
+    /// 
+    /// Analyze ripper; save in file info
+    /// Apply replacement pattern based on ripper, HETeam - 'und' and no info
     /// </summary>
     private string GetRipperInfo() {
       // read these mapping from config file
@@ -239,22 +251,25 @@ namespace ConsoleApp {
       var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
       // apply ripper patterns
       // psa
-      tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "Br.psa");
-      tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "Br.psa");
-      tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "Br.10.6.psa");
+      tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "psa");
+      tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "psa");
+      tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10.6.psa");
       // found 'INTERNAL' with psa; 2019 Movie
-      tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "Br.psa");
+      tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "psa");
       // see if really BrRip is found in original string
-      tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080p.Br.6.psa");
-      tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080p.Br.6.psa");
+      tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080p.6.psa");
+      tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080p.6.psa");
       // webrip psa
       tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.psa");
       tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10.6.psa");
       // RMTeam
-      tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "rem.Br.rmt");
-      tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "Br.rmt");
+      tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT.Rem");
+      tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
       // RMTeam 1080p
-      tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080p.Br.rmt");
+      tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080p.RMT");
+
+      // HETeam
+      tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080p.6.HET.Ext");
 
       if (string.IsNullOrEmpty(tail))
         return "";
@@ -295,7 +310,7 @@ namespace ConsoleApp {
                 // accept containers containing subrip: currently only mkv
                 if (IsSupportedMedia(mFileInfo.Path)) {
                   var extractSub = new FFMpegUtil(ref mFileInfo);
-                  await extractSub.Run(ShouldSimulate);
+                  mFileInfo = await extractSub.Run(ShouldSimulate);
                 }
               }
               break;

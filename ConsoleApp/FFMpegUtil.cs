@@ -24,8 +24,13 @@ namespace ConsoleApp {
     private string FFMpegPath { get; set; }
     private bool ShouldChangeContainer;
 
-    internal async Task Run(bool ShouldSimulate = true)
-    {
+    /// <summary>
+    /// Since an async method does not support ref parameter passing we cannot utilize
+    /// `ref FileInfoType` here. Hence we copy it back in the end.
+    /// </summary>
+    /// <param name="ShouldSimulate"></param>
+    /// <returns></returns>
+    internal async Task<FileInfoType> Run(bool ShouldSimulate = true) {
       var filePath = mFileInfo.Path;
       // var mediaInfo = FileInfo.Parent + @"\ffmpeg_media_info.log";
       Console.WriteLine("Processing Media " + filePath + ":");
@@ -34,7 +39,7 @@ namespace ConsoleApp {
       var sCodecId = ParseMediaInfo(ffprobeStr);
 
       if (ShouldSimulate)
-        return;
+        return mFileInfo;
 
       if (!string.IsNullOrEmpty(sCodecId))
         await ExtractSubtitle(filePath, sCodecId);
@@ -60,6 +65,7 @@ namespace ConsoleApp {
           }
         }
       }
+      return mFileInfo;
     }
 
     private async Task<string> GetMediaInfo(string filePath) {
@@ -86,7 +92,7 @@ namespace ConsoleApp {
               mFileInfo.SetDirtyFlag("Fail: corrupted media file");
             }
 
-            Console.WriteLine("Elapsed time: " + Math.Round((probeProcess.ExitTime - probeProcess.
+            Console.WriteLine("GetMediaInfo() took " + Math.Round((probeProcess.ExitTime - probeProcess.
               StartTime).TotalMilliseconds) + " ms");
             // $"Exit time    : {probeProcess.ExitTime}, " +
 
@@ -123,25 +129,25 @@ namespace ConsoleApp {
         return sCodeId;
 
       var needle = "Input #0";
-      int start = mediaInfoStr.IndexOf(needle);
+      int needleIndex = mediaInfoStr.IndexOf(needle);
 
-      if (start == -1) {
+      if (needleIndex == -1) {
         Console.WriteLine("Container info not found, corrupted file?");
         return sCodeId;
       }
 
-      int prevNeedlePos = start + needle.Length;
+      int prevNeedlePos = needleIndex + needle.Length;
       needle = "from '";
 
-      if ((start = mediaInfoStr.IndexOf(needle, prevNeedlePos)) == -1) {
+      if ((needleIndex = mediaInfoStr.IndexOf(needle, prevNeedlePos)) == -1) {
         Console.WriteLine("Container info end needle not found!!");
         return sCodeId;
       }
-      Console.WriteLine("Container: " + mediaInfoStr.Substring(prevNeedlePos+2, start -
+      Console.WriteLine("Container: " + mediaInfoStr.Substring(prevNeedlePos+2, needleIndex -
         prevNeedlePos-4));
 
       // assuming container info wouldn't be less than 50, usually filled with metadata and chapter info
-      prevNeedlePos = start + needle.Length + 50;
+      prevNeedlePos = needleIndex + needle.Length + 50;
       var lineNeedle = "Stream #0:";
       var lineEndNeedle = "Metadata:";
       var langTitleNeedle = "title";
@@ -150,17 +156,17 @@ namespace ConsoleApp {
 
       int aCount = 0, sCount = 0;
 
-      while ((start = mediaInfoStr.IndexOf(lineNeedle, prevNeedlePos)) != -1) {
-        prevNeedlePos = start + lineNeedle.Length;
+      while ((needleIndex = mediaInfoStr.IndexOf(lineNeedle, prevNeedlePos)) != -1) {
+        prevNeedlePos = needleIndex + lineNeedle.Length;
 
-        if ((start = mediaInfoStr.IndexOf(lineEndNeedle, prevNeedlePos + 2)) == -1) {
+        if ((needleIndex = mediaInfoStr.IndexOf(lineEndNeedle, prevNeedlePos + 2)) == -1) {
           Console.WriteLine("Stream info line end needle not found!");
           return sCodeId;
         }
 
-        var streamLine = mediaInfoStr.Substring(prevNeedlePos - 2, start - prevNeedlePos - 4);
+        var streamLine = mediaInfoStr.Substring(prevNeedlePos - 2, needleIndex - prevNeedlePos - 4);
         Console.WriteLine(" " + streamLine);
-        prevNeedlePos = start + lineEndNeedle.Length;
+        prevNeedlePos = needleIndex + lineEndNeedle.Length;
 
         // will throw IndexOutOfRangeException if result does not have 2
         var streamType = streamLine.Split(": ")[1];
@@ -179,17 +185,39 @@ namespace ConsoleApp {
             else if (streamLine.Contains("(eng)") && string.IsNullOrEmpty(sCodeId))
               sCodeId = "0:" + streamLine.Split(new Char[] { ':', '(' })[1];
 
-            // Metadata (Title, BPS etc) info show only Title for verbosity
-            if ((start = mediaInfoStr.IndexOf(streamEndNeedle, prevNeedlePos + 2)) == -1)
-              Console.WriteLine("Stream info end needle not found!");
-            else {
-              Console.WriteLine(mediaInfoStr.Substring(prevNeedlePos + 2, start - prevNeedlePos - 10));
-              prevNeedlePos = start + streamEndNeedle.Length;
+            int prevMatchIndex = needleIndex;
+            // look for title
+            if ((needleIndex = mediaInfoStr.IndexOf(langTitleNeedle, prevNeedlePos + 2)) == -1) {
+              needleIndex = prevMatchIndex;
+
+              // Metadata (Title, BPS etc) info show only Title for verbosity
+              if ((needleIndex = mediaInfoStr.IndexOf(streamEndNeedle, prevNeedlePos + 2)) == -1) {
+                Console.WriteLine("Stream info end needle not found!");
+                needleIndex = prevMatchIndex;
+              }
+              else
+                Console.WriteLine(mediaInfoStr.Substring(prevNeedlePos + 2, needleIndex - prevNeedlePos - 10));
+
+              prevNeedlePos = needleIndex + streamEndNeedle.Length;
+            }
+            else {  // Title found
+              // save needleIndex, so we can propagate `prevNeedlePos` when this needle is not found!
+              prevMatchIndex = needleIndex;
+              if ((needleIndex = mediaInfoStr.IndexOf("\r\n", needleIndex + 2)) == -1) {
+                Console.WriteLine("Title end not found!");
+                prevNeedlePos = prevMatchIndex + langTitleNeedle.Length + 5;
+              }
+              else {
+                Console.WriteLine("  " + mediaInfoStr.Substring(prevMatchIndex, needleIndex - prevMatchIndex));
+                // propagate `prevNeedlePos` relative to newly found match
+                prevNeedlePos = needleIndex + langTitleNeedle.Length + 5;
+              }
             }
             sCount++;
             break;
 
           case "Audio":
+            // show warning for non- 'eng' Audio i.e., und, rus, dan, kor, pol, chi
             aCount++;
             break;
           case "Video":
@@ -208,8 +236,8 @@ namespace ConsoleApp {
 
       if (sCount > 0) {
         if (string.IsNullOrEmpty(sCodeId)) {
-          Console.WriteLine("Failed to choose subtitle index! Disabling container change..");
-          ShouldChangeContainer = false;
+          Console.WriteLine("Could not find EN subtitle stream in input!");
+          // ShouldChangeContainer = false;
         }
         else {
           Console.WriteLine("Subtile stream index: " + sCodeId);
@@ -234,8 +262,20 @@ namespace ConsoleApp {
         return;
 
       // https://docs.microsoft.com/en-us/dotnet/api/system.io.path.getfilenamewithoutextension
+      var subRipExt = ".srt";
       var srtFilePath = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
-        + ".srt";
+        + subRipExt;
+
+      if (System.IO.File.Exists(srtFilePath)) {
+        Console.WriteLine("Subrip file already exists, renaming");
+        var oldSrtFilePath = srtFilePath.Substring(0, srtFilePath.Length-subRipExt.Length) + "_old.srt";
+
+        if (System.IO.File.Exists(oldSrtFilePath))
+          FileOperationAPIWrapper.Send(oldSrtFilePath);
+
+        System.IO.File.Move(srtFilePath, oldSrtFilePath);
+      }
+
       TaskCompletionSource<bool> ffmpegEventHandled = new TaskCompletionSource<bool>();
 
       using (System.Diagnostics.Process ffmpegProcess = new System.Diagnostics.Process {
@@ -252,7 +292,7 @@ namespace ConsoleApp {
           // Start a process and raise an event when done.
           ffmpegProcess.Exited += (sender, args) => {
             if (ffmpegProcess.ExitCode != 0) {
-              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", an overwrite is not" +
+              Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", an overwrite is not " +
                 "confirmed or ffmpeg is invoked incorrectly! Please check input stream. codec id: " + sCodecId);
             }
 
@@ -299,6 +339,12 @@ namespace ConsoleApp {
       // https://docs.microsoft.com/en-us/dotnet/api/system.io.path.getfilenamewithoutextension
       var mpegFilePath = mFileInfo.Parent + "\\" + System.IO.Path.GetFileNameWithoutExtension(filePath)
         + ".mp4";
+
+      if (System.IO.File.Exists(mpegFilePath)) {
+        Console.WriteLine("mp4 file already exists!");
+        return false;
+      }
+
       TaskCompletionSource<bool> ffmpegEventHandled = new TaskCompletionSource<bool>();
 
       using (System.Diagnostics.Process ffmpegProcess = new System.Diagnostics.Process {
@@ -323,7 +369,7 @@ namespace ConsoleApp {
             }
 
             Console.WriteLine("Elapsed time: " + Math.Round((ffmpegProcess.ExitTime - ffmpegProcess.
-              StartTime).TotalMilliseconds) + " ms (change to mp4 container");
+              StartTime).TotalMilliseconds) + " ms (change to mp4 container)");
 
             ffmpegEventHandled.TrySetResult(true);
             ffmpegProcess.Dispose();
