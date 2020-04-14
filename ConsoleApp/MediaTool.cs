@@ -45,6 +45,7 @@ namespace ConsoleApp {
 
     // Actions Summary Related
     private int ModifiedFileCount = 0;
+    private int FailedFileCount = 0;
     // FileInfo for our media files
     internal FileInfoType mFileInfo = new FileInfoType();
 
@@ -78,7 +79,7 @@ namespace ConsoleApp {
       if (! IsSupportedArchive(filePath))
         return false;
 
-      mFileInfo.SetDirtyFlag("extract");
+      mFileInfo.Update("extract");
 
       using (var archive = SharpCompress.Archives.Rar.RarArchive.Open(filePath)) {
         // archive not null when next archive is not found 
@@ -88,7 +89,9 @@ namespace ConsoleApp {
             // extracting file during simulation: is it a good idea?
             mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
 
-            if (!ShouldSimulate) {
+            // if ()
+
+            if (! ShouldSimulate) {
               entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions() {
                 ExtractFullPath = true,
                 Overwrite = true }
@@ -147,7 +150,7 @@ namespace ConsoleApp {
 
       if (mFileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
-        mFileInfo.SetDirtyFlag("rename");
+        mFileInfo.Update("rename");
         Console.WriteLine("   " + GetSimplifiedPath(mFileInfo.Path) + ": " + mFileInfo.ModInfo);
         Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
@@ -249,30 +252,66 @@ namespace ConsoleApp {
       // read these mapping from config file
       var fileName = GetSimplifiedPath(mFileInfo.Path);
       var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
+
+      // ToDo: recognize TV Shows
       // apply ripper patterns
       // psa
-      tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "psa");
-      tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "psa");
-      tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10.6.psa");
-      // found 'INTERNAL' with psa; 2019 Movie
-      tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "psa");
-      // see if really BrRip is found in original string
-      tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080p.6.psa");
-      tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080p.6.psa");
-      // webrip psa
-      tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.psa");
-      tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10.6.psa");
+      // simplify may be using a loop
+      if (tail.Contains("x265.HEVC-PSA") || tail.Substring(0, tail.Length - 3)=="." || tail.Substring(0, tail.Length-3).EndsWith("6."))
+        mFileInfo.Ripper = "psa";
+      else if (tail.Contains("x265.rmteam") || tail.Substring(0, tail.Length - 3).EndsWith("RMT."))
+        mFileInfo.Ripper = "RMT";
+      else if (tail.Contains("x265-HETeam") || tail.Substring(0, tail.Length - 3).EndsWith("HET.") || tail.Substring(0, tail.Length - 3).EndsWith("HET.Ext"))
+        mFileInfo.Ripper = "HET";
+      else {
+        Console.WriteLine("Uknown ripper! Suffix: " + tail + Environment.NewLine);
+        mFileInfo.Ripper = "Unknown";
+        return string.Empty;
+      }
+
+      var oldTail = tail;
+      // Console.WriteLine("tail: " + tail);   debug
+
+      // default: empty string for Video: 720p, Bluray, x265 and audio: 2CH
+      switch (mFileInfo.Ripper) {
+      case "psa":
+        // found 'INTERNAL' with psa; 2019 Movie
+        tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA.", "");
+        tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA.", "");
+        tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA.", "");
+        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10.6");
+        // see if really BrRip is found in original string
+        tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080.6");
+        tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080.6");
+        // webrip psa
+        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
+        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10.6");
+        break;
+
       // RMTeam
-      tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT.Rem");
-      tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
-      // RMTeam 1080p
-      tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080p.RMT");
+      case "RMT":
+        tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT.Rem");
+        tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
+        // RMTeam 1080p
+        tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080.RMT");
+        break;
 
       // HETeam
-      tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080p.6.HET.Ext");
+      case "HET":
+        tail = tail.Replace("720p.BluRay.x265-HETeam", "HET");
+        tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080.6.HET.Ext");
+        tail = tail.Replace("1080p.BluRay.x265-HETeam", "1080.6.HET");
+        break;
+
+      default:
+        break;
+      }
+
+      if (tail == oldTail)
+        Console.WriteLine("Unkown " + mFileInfo.Ripper + " pattern! Suffix: " + tail);
 
       if (string.IsNullOrEmpty(tail))
-        return "";
+        return string.Empty;
       // drop first char, can be non dot
       return '.' + tail;
     }
@@ -284,7 +323,7 @@ namespace ConsoleApp {
     private async Task ProcessFile(string filePath) {
       if (! System.IO.Path.HasExtension(filePath)) {
         Console.WriteLine("File does not have an extension!");
-        mFileInfo.SetDirtyFlag("Fail: has no extension");
+        mFileInfo.Update("Fail: has no extension");
         return;
       }
 
@@ -321,8 +360,9 @@ namespace ConsoleApp {
           }
         }
 
-
-      if (mFileInfo.IsModified)
+      if (mFileInfo.IsInError)
+        FailedFileCount++;
+      else if (mFileInfo.IsModified)
         ModifiedFileCount++;
     }
 
@@ -401,9 +441,8 @@ namespace ConsoleApp {
     public void DisplaySummary() {
       if (ShouldSimulate)
         Console.WriteLine("Simulated summary:");
+      Console.WriteLine("Failed    files# " + FailedFileCount);
       Console.WriteLine("Processed files# " + ModifiedFileCount);
-      // ToDo
-      //Console.WriteLine("Failed# " + ModifiedFileCount);
     }
 
     /// <summary>
