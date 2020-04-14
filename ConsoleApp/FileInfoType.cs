@@ -13,33 +13,44 @@ namespace ConsoleApp {
   /// </remarks>  
   /// </summary>
   class FileInfoType {
-      public string Path { get; set; }
-      public string Parent { get; set; }
-      public bool IsModified { get; set; }
-      public int YearPosition { get; set; }
-      public int YearLength { get; set; }
-      // public string[] Lines { get; set; }
+    public string Path { get; set; }
+    public string Parent { get; set; }
+    public bool IsModified { get; set; }
+    public bool IsInError { get; set; }
+    public string Ripper { get; set; }
+    public int YearPosition { get; set; }
+    public int YearLength { get; set; }
+    // public string[] Lines { get; set; }
 
-      public void Init(string Path) {
-        this.Path = Path;
-        this.Parent = System.IO.Path.GetDirectoryName(Path);
-        IsModified = false;
-        // Lines = null;
-        ModInfo = string.Empty;
-      }
-      public void SetDirtyFlag(string str) {
-        if (IsModified) {
-          if (! ModInfo.Contains(str))
-            ModInfo += ", " + str;
-        }
-        else {
-          IsModified = true;
-          System.Diagnostics.Debug.Assert(string.IsNullOrEmpty(ModInfo));
-          ModInfo += str;
+    public void Init(string Path) {
+      this.Path = Path;
+      this.Parent = System.IO.Path.GetDirectoryName(Path);
+      IsModified = false;
+      IsInError = false;
+      // Lines = null;
+      ModInfo = string.Empty;
+    }
+
+    public void Update(string str) {
+      if (!IsInError) {
+        if (str.Contains("Fail")) {
+          IsInError = true;
+          return ;
         }
       }
 
-      // list of actions being performed in the file
-      public string ModInfo { get; set; }
+      if (IsModified) {
+        if (! ModInfo.Contains(str))
+          ModInfo += ", " + str;
+      }
+      else {
+        IsModified = true;
+        System.Diagnostics.Debug.Assert(string.IsNullOrEmpty(ModInfo));
+        ModInfo += str;
+      }
+    }
+
+    // list of actions being performed in the file
+    public string ModInfo { get; set; }
   }
 }

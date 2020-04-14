@@ -44,7 +44,8 @@ namespace ConsoleApp {
       if (!string.IsNullOrEmpty(sCodecId))
         await ExtractSubtitle(filePath, sCodecId);
 
-      if (ShouldChangeContainer && ! mFileInfo.ModInfo.Contains("Fail")) {
+      if (ShouldChangeContainer && ! mFileInfo.IsInError) {
+        // ToDo: check for free space
         // ConvertMedia has a high elapsed time, take advantage of async: do tasks before await inside
         bool isSuccess = await ConvertMedia(filePath);
         if (isSuccess) {
@@ -54,10 +55,10 @@ namespace ConsoleApp {
           // update file path
           mFileInfo.Path = mFileInfo.Parent + "\\" +
             System.IO.Path.GetFileNameWithoutExtension(filePath) + ".mp4";
-          mFileInfo.SetDirtyFlag("convert");
+          mFileInfo.Update("convert");
 
-          if (!ShouldSimulate && !mFileInfo.ModInfo.Contains("Fail")) { 
-            // show how output looks like
+          if (!ShouldSimulate && !mFileInfo.IsInError) { 
+            // show how output media looks like
             Console.WriteLine();
             ffprobeStr = await GetMediaInfo(mFileInfo.Path);
             sCodecId = ParseMediaInfo(ffprobeStr);
@@ -89,7 +90,7 @@ namespace ConsoleApp {
             if (probeProcess.ExitCode != 0) {
               Console.WriteLine("Exit code: " + probeProcess.ExitCode + ", please check if it's corrupted file: " + filePath);
               // ToDo: pass FileInfo ** high pri this one
-              mFileInfo.SetDirtyFlag("Fail: corrupted media file");
+              mFileInfo.Update("Fail: corrupted media file");
             }
 
             Console.WriteLine("GetMediaInfo() took " + Math.Round((probeProcess.ExitTime - probeProcess.
@@ -104,7 +105,6 @@ namespace ConsoleApp {
           ffprobeStr = probeProcess.StandardError.ReadToEnd();
           // Blocking start process example
           // probeProcess.WaitForExit();
-          // Console.WriteLine("Received output: " + ffprobeStr);
 
           // Wait for ffProbe process Exited event, but not more than 10 seconds
           await Task.WhenAny(probeEventHandled.Task, Task.Delay(10000));
@@ -127,6 +127,8 @@ namespace ConsoleApp {
 
       if (string.IsNullOrEmpty(mediaInfoStr))
         return sCodeId;
+      // Debug
+      // Console.WriteLine("Received output: " + mediaInfoStr);
 
       var needle = "Input #0";
       int needleIndex = mediaInfoStr.IndexOf(needle);
@@ -171,7 +173,7 @@ namespace ConsoleApp {
         // will throw IndexOutOfRangeException if result does not have 2
         var streamType = streamLine.Split(": ")[1];
         if (string.IsNullOrEmpty(streamLine) || string.IsNullOrEmpty(streamType)) {
-          mFileInfo.SetDirtyFlag("Fail: unexpected input found");
+          mFileInfo.Update("Fail: unexpected input found");
           return sCodeId;
         }
 
@@ -186,13 +188,21 @@ namespace ConsoleApp {
               sCodeId = "0:" + streamLine.Split(new Char[] { ':', '(' })[1];
 
             int prevMatchIndex = needleIndex;
-            // look for title
+            // look for title, currently we don't check if this is crossing boundary of current
+            // stream i.e., next stream audio can have title; it's safer to get bounded media
+            // info str instead of entire string
             if ((needleIndex = mediaInfoStr.IndexOf(langTitleNeedle, prevNeedlePos + 2)) == -1) {
               needleIndex = prevMatchIndex;
 
               // Metadata (Title, BPS etc) info show only Title for verbosity
               if ((needleIndex = mediaInfoStr.IndexOf(streamEndNeedle, prevNeedlePos + 2)) == -1) {
-                Console.WriteLine("Stream info end needle not found!");
+                // ToDo: make this generic, so we don't rely on `streamEndNeedle`
+                /* if (mFileInfo.Ripper == "RMT")
+                  // examine this pattern
+                  Console.WriteLine("\r\nRMT:\r\n" + mediaInfoStr.Substring(prevNeedlePos + 2, mediaInfoStr.Length - prevNeedlePos - 10));
+                else */
+                Console.WriteLine("Stream info end needle " + streamEndNeedle + " not found!");
+
                 needleIndex = prevMatchIndex;
               }
               else
@@ -211,8 +221,42 @@ namespace ConsoleApp {
                 Console.WriteLine("  " + mediaInfoStr.Substring(prevMatchIndex, needleIndex - prevMatchIndex));
                 // propagate `prevNeedlePos` relative to newly found match
                 prevNeedlePos = needleIndex + langTitleNeedle.Length + 5;
+                if (mFileInfo.Ripper == "HET")
+                  Console.WriteLine("(Title found: this is new for " + mFileInfo.Ripper + ")");
               }
             }
+
+            // Discovery; after enough data remove this
+            switch (mFileInfo.Ripper) {
+            case "psa":
+              if (streamLine.Contains("ass"))
+                Console.WriteLine("(SSA sub found: this is new for " + mFileInfo.Ripper + ")");
+              break;
+
+            // RMTeam
+            case "RMT":
+              if (streamLine.Contains("subrip"))
+                Console.WriteLine("(Subrip found: this is new for " + mFileInfo.Ripper + ")");
+              break;
+
+            case "HET":
+              if (streamLine.Contains("hdmv_pgs_subtitle"))
+                Console.WriteLine("HET hdmv_pgs_subtitle skipping..");
+              else if (string.IsNullOrEmpty(sCodeId)) {
+                sCodeId = "0:" + streamLine.Split(':')[1];
+              }
+              else
+                Console.WriteLine("(eng sub found: this is new for " + mFileInfo.Ripper + ")");
+
+              if (streamLine.Contains("ass"))
+                Console.WriteLine("(SSA sub found: this is new for " + mFileInfo.Ripper + ")");
+              break;
+
+            default:
+              break;
+            }
+
+
             sCount++;
             break;
 
@@ -227,7 +271,7 @@ namespace ConsoleApp {
             break;
           default:
             // Todo
-            mFileInfo.SetDirtyFlag("Fail: unknown stream found");
+            mFileInfo.Update("Fail: unknown stream found");
             break;
         }
       }
@@ -241,12 +285,12 @@ namespace ConsoleApp {
         }
         else {
           Console.WriteLine("Subtile stream index: " + sCodeId);
-      }
+        }
 
-      if (aCount > 1) {
-        // show warning, parse aCodec Id
-        Console.WriteLine("Audio streams# " + aCount + "! Disabling container change..");
-        ShouldChangeContainer = false;
+        if (aCount > 1) {
+          // show warning, parse aCodec Id
+          Console.WriteLine("Audio streams# " + aCount + "! Disabling container change..");
+          ShouldChangeContainer = false;
         }
       }
 
@@ -342,6 +386,7 @@ namespace ConsoleApp {
 
       if (System.IO.File.Exists(mpegFilePath)) {
         Console.WriteLine("mp4 file already exists!");
+        mFileInfo.IsInError = true;
         return false;
       }
 
@@ -364,7 +409,7 @@ namespace ConsoleApp {
             if (ffmpegProcess.ExitCode != 0) {
               Console.WriteLine("Exit code: " + ffmpegProcess.ExitCode + ", ffmpeg is invoked " +
                 "incorrectly! Please check input stream. args: " + ffmpegProcess.StartInfo.Arguments);
-              mFileInfo.SetDirtyFlag("Fail: media conversion");
+              mFileInfo.Update("Fail: media conversion");
               return;
             }
 
