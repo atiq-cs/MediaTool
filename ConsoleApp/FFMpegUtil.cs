@@ -12,6 +12,11 @@ namespace ConsoleApp {
     /// Member variable probably cannot be reference
     /// A solution is to pass this to methods
     /// </remarks>
+    /// <c>code block inline example</c>
+    ///
+    /// Later, may be verify if found block contains property as well.
+    /// Don't pass `filePath` as param, it is updated by rename and should be retrieved from FileInfo
+    /// https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
     /// </summary>
 
     public FFMpegUtil(ref FileInfoType fileInfo) {
@@ -46,16 +51,18 @@ namespace ConsoleApp {
 
       if (ShouldChangeContainer && ! mFileInfo.IsInError) {
         // ToDo: check for free space
-        // ConvertMedia has a high elapsed time, take advantage of async: do tasks before await inside
+        // ConvertMedia has a high elapsed time, take advantage of async: do tasks before await
+        // inside
         bool isSuccess = await ConvertMedia(filePath);
         if (isSuccess) {
+          mFileInfo.Update("convert");
+
           // remove the input mkv file
           FileOperationAPIWrapper.Send(filePath);
 
           // update file path
           mFileInfo.Path = mFileInfo.Parent + "\\" +
             System.IO.Path.GetFileNameWithoutExtension(filePath) + ".mp4";
-          mFileInfo.Update("convert");
 
           if (!ShouldSimulate && !mFileInfo.IsInError) { 
             // show how output media looks like
@@ -69,6 +76,18 @@ namespace ConsoleApp {
       return mFileInfo;
     }
 
+    /// <summary>
+    /// ToDo:
+    /// utilize this args ` -v quiet -print_format json -show_format -show_streams -i ` instead
+    /// 
+    /// Reference
+    /// Using ffmpeg to get video info - why do I need to specify an output file?
+    /// https://stackoverflow.com/q/11400248
+    ///  Get ffmpeg information in friendly way
+    ///  https://stackoverflow.com/q/7708373
+    /// </summary>
+    /// <param name="filePath"></param>
+    /// <returns></returns>
     private async Task<string> GetMediaInfo(string filePath) {
       string ffprobeStr = string.Empty;
 
@@ -122,6 +141,11 @@ namespace ConsoleApp {
       return ffprobeStr;
     }
 
+    /// <summary>
+    /// Parse json instead
+    /// </summary>
+    /// <param name="mediaInfoStr"></param>
+    /// <returns></returns>
     private string ParseMediaInfo(string mediaInfoStr) {
       string sCodeId = string.Empty;
 
@@ -157,6 +181,7 @@ namespace ConsoleApp {
       Console.WriteLine("Streams found: ");
 
       int aCount = 0, sCount = 0;
+      string initialSCodecId = "";
 
       while ((needleIndex = mediaInfoStr.IndexOf(lineNeedle, prevNeedlePos)) != -1) {
         prevNeedlePos = needleIndex + lineNeedle.Length;
@@ -177,15 +202,17 @@ namespace ConsoleApp {
           return sCodeId;
         }
 
+
         switch (streamType) {
           case "Subtitle":
+            // var subType = streamLine.Split(": ")[2];
+            // if (subType != "subrip")
             // set s codec id
-            // (eng) ... (default)
-            if (streamLine.Contains("(eng)") && streamLine.Contains("(default)"))
+            // (eng) ... (default) Or (eng)
+            if ((streamLine.Contains("(eng)") && streamLine.Contains("(default)")) || (streamLine.Contains("(eng)") && string.IsNullOrEmpty(sCodeId)))
               sCodeId = "0:" + streamLine.Split(new Char[] { ':', '(' })[1];
-            // (eng)
-            else if (streamLine.Contains("(eng)") && string.IsNullOrEmpty(sCodeId))
-              sCodeId = "0:" + streamLine.Split(new Char[] { ':', '(' })[1];
+            else if (string.IsNullOrEmpty(initialSCodecId))
+              initialSCodecId = "0:" + streamLine.Split(':')[1];
 
             int prevMatchIndex = needleIndex;
             // look for title, currently we don't check if this is crossing boundary of current
@@ -276,16 +303,26 @@ namespace ConsoleApp {
         }
       }
 
-      Console.WriteLine("Nmber of subtitles: " + sCount + ", nmber of audio: " + aCount);
+      Console.WriteLine("Number of subtitles: " + sCount + ", number of audio: " + aCount);
 
       if (sCount > 0) {
         if (string.IsNullOrEmpty(sCodeId)) {
           Console.WriteLine("Could not find EN subtitle stream in input!");
           // ShouldChangeContainer = false;
+
+          if (sCount == 1) {
+            switch (mFileInfo.Ripper) {
+            case "psa":
+              Console.WriteLine("this is unusual for " + mFileInfo.Ripper + "!");
+              break;
+            }
+          }
+
+          sCodeId = initialSCodecId;
+          Console.WriteLine("Defaulted to only found subtitle with index: " + sCodeId);
         }
-        else {
-          Console.WriteLine("Subtile stream index: " + sCodeId);
-        }
+        else
+          Console.WriteLine("Subtitle stream index: " + sCodeId);
 
         if (aCount > 1) {
           // show warning, parse aCodec Id

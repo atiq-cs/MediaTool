@@ -23,7 +23,7 @@ namespace ConsoleApp {
     public enum CONVERTSTAGE {
       ExtractArchive,
       RenameFile,
-      ExtractSubtitle,   // sub still part of discussion
+      ExtractMedia,   // media = mp4 + srt
       CreateArchive
     };
 
@@ -72,8 +72,15 @@ namespace ConsoleApp {
     /// Extract Rar Archives and clean up
     /// 
     /// https://docs.microsoft.com/en-us/dotnet/api/system.io.directory.getfiles
+    /// 
+    /// References
+    /// base URL https://github.com/adamhathcock/sharpcompress/blob/master
+    /// USAGE.md
+    /// src/SharpCompress/Common/ExtractionOptions.cs
+    /// Deletion of compressed file after extracting it with nunrar
+    ///  https://stackoverflow.com/q/17467951
     /// </summary>
-    /// <param name="filePath"></param>
+    /// <param name="filePath">the file path variable</param>
     /// <returns></returns>
     public bool ExtractRar(string filePath) {
       if (! IsSupportedArchive(filePath))
@@ -84,24 +91,26 @@ namespace ConsoleApp {
       using (var archive = SharpCompress.Archives.Rar.RarArchive.Open(filePath)) {
         // archive not null when next archive is not found 
         try {
+          // ToDO: show warning for multiple files
           foreach (var entry in archive.Entries) {
             // simulation does not continue because file is not extracted
             // extracting file during simulation: is it a good idea?
             mFileInfo.Path = mFileInfo.Parent + "\\" + entry.Key;
 
-            // if ()
+            HasEnoughFreeSpace(entry.Size, 2);
 
-            if (! ShouldSimulate) {
+            if (!ShouldSimulate && !mFileInfo.IsInError)
               entry.WriteToDirectory(mFileInfo.Parent, new SharpCompress.Common.ExtractionOptions() {
                 ExtractFullPath = true,
                 Overwrite = true }
               );
-            }
+
             break;    // only get first item, for psa that's what we expect that much
           }
         }
         catch (System.ArgumentException e) {
           Console.WriteLine("Probably could not find next archive! Msg:\r\n" + e.Message);
+          mFileInfo.Update("Fail: SharpCompress Rar Open error");
           return false;
         }
       }
@@ -113,19 +122,21 @@ namespace ConsoleApp {
         // Only get files that begin with the letter "c".
         string sPath = GetSimplifiedPath(filePath);
         var pattern = sPath.Substring(0, sPath.Length - tail.Length) + "part*.rar";
-        Console.WriteLine("Rar find pattern: " + pattern);
+        // Console.WriteLine("Rar find pattern: " + pattern);   debug
 
         string[] rarFiles = Directory.GetFiles(mFileInfo.Parent, pattern);
 
-        foreach (string rarFile in rarFiles) {
-          Console.WriteLine("Removing file: " + rarFile);
+        if (!mFileInfo.IsInError)
+          foreach (string rarFile in rarFiles) {
 
           if (!ShouldSimulate)
             FileOperationAPIWrapper.Send(rarFile);
         }
       }
-      else if (!ShouldSimulate)
+      else if (!ShouldSimulate && !mFileInfo.IsInError) {
+        Console.WriteLine("Removing file: " + filePath);
         FileOperationAPIWrapper.Send(filePath);
+      }
 
       return true;
     }
@@ -134,6 +145,8 @@ namespace ConsoleApp {
     /// Renames media file
     /// <remarks> ExtractRar might have modified file name. Hence, don't pass `filePath` as param,
     /// it should be retrieved from FileInfo </remarks>
+    /// ToDo: don't rename if input is mkv or rar
+    ///  introduce mFileInfo.OutPath instead
     /// </summary>
     private void RenameFile() {
       string filePath = mFileInfo.Path;
@@ -155,7 +168,7 @@ namespace ConsoleApp {
         Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
 
-      if (!ShouldSimulate && mFileInfo.IsModified) {
+      if (!ShouldSimulate && mFileInfo.IsModified && !mFileInfo.IsInError) {
         // check if file already exists before rename, send to recycle bin if exists :)
         if (File.Exists(outFileName))
           FileOperationAPIWrapper.Send(outFileName);
@@ -165,25 +178,43 @@ namespace ConsoleApp {
       }
     }
 
-    /// <summary>
-    /// Extract subrip caption from given media file
-    /// if only ass is found, convert it to srt using ffmpeg
-    /// <remarks>  </remarks>
-    /// <c>isBlockCommentStatusToggling</c>. example code block inline
-    /// Later, may be verify if found block contains property as well.
-    /// Don't pass `filePath` as param, it is updated by rename and should be retrieved from FileInfo
-    /// https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
-    /// </summary>
-    //private async Task ExtractSubRip() {
-    // place holder; it moved
-    //}
 
+
+    /// RenameFile Helper Methods Below
+    /// <summary>
+    /// Considers additional 64 MB
+    ///
+    /// <remarks> must need simplified path, validator is set to ensure this
+    /// Shares `FileInfo.YearPosition` & `YearLength` with GetTitle & GetRipperInfo
+    /// </remarks>
+    /// </summary>
+    private void HasEnoughFreeSpace(long fileSize, int multiplier = 1) {
+      long freeSpaceBytes = 0;
+      try {
+        freeSpaceBytes = new DriveInfo(mFileInfo.Path.Substring(0, 1)).AvailableFreeSpace;
+      }
+      catch (ArgumentException e) {
+        Console.WriteLine("Invalid drive: " + e.Message);
+      }
+
+      long requiredSpaceBytes = multiplier * fileSize + 64 * 1024 * 1024;
+
+      if (freeSpaceBytes < requiredSpaceBytes) {
+        mFileInfo.Update("Fail: not enough free space in drive "+ mFileInfo.Path.Substring(0, 1));
+        Console.WriteLine("Not enough free space in " + mFileInfo.Path.Substring(0, 1) +
+          " drive! Required more " + requiredSpaceBytes / (1024*1024) + " MB for the operation.");
+      }
+    }
 
     /// RenameFile Helper Methods Below
     /// <summary>
     /// Converts to format ' YYYY'
     /// similar to imdb style rename: ' (YYYY)'; however, drop the parenthesis
     ///
+    /// ToDo: should be used only for movies (when TV show check fails)
+    ///  call with prefix for movie part coz that guarantees a year to exist
+    ///  be lenient on names with non-existing year
+    /// 
     /// <remarks> must need simplified path, validator is set to ensure this
     /// Shares `FileInfo.YearPosition` & `YearLength` with GetTitle & GetRipperInfo
     /// </remarks>  
@@ -227,16 +258,16 @@ namespace ConsoleApp {
     /// Shares `FileInfo.YearPosition` with GetRipperInfo
     /// </remarks>
     /// </summary>
-    private string GetTitle()
-    {
+    private string GetTitle() {
+      // expecting at least 3 chars before year
       if (mFileInfo.YearPosition < 3)
-        throw new ArgumentException("Wrong year position!");
+        throw new ArgumentException("Wrong year position: " + mFileInfo.YearPosition + "!");
+
       var fileName = GetSimplifiedPath(mFileInfo.Path);
 
       // replace all the dots with space till that index
       var title = fileName.Substring(0, mFileInfo.YearPosition).Replace('.', ' ');
-      title = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(title);
-      return title;
+      return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(title);
     }
 
     /// <summary>
@@ -257,16 +288,16 @@ namespace ConsoleApp {
       // apply ripper patterns
       // psa
       // simplify may be using a loop
-      if (tail.Contains("x265.HEVC-PSA") || tail.Substring(0, tail.Length - 3)=="." || tail.Substring(0, tail.Length-3).EndsWith("6."))
+      if (tail.Contains("x265.HEVC-PSA") || tail.Length == 3 || tail.Substring(0, tail.Length-3).EndsWith("6."))
         mFileInfo.Ripper = "psa";
       else if (tail.Contains("x265.rmteam") || tail.Substring(0, tail.Length - 3).EndsWith("RMT."))
         mFileInfo.Ripper = "RMT";
       else if (tail.Contains("x265-HETeam") || tail.Substring(0, tail.Length - 3).EndsWith("HET.") || tail.Substring(0, tail.Length - 3).EndsWith("HET.Ext"))
         mFileInfo.Ripper = "HET";
       else {
-        Console.WriteLine("Uknown ripper! Suffix: " + tail + Environment.NewLine);
+        Console.WriteLine("Unknown ripper! Suffix: " + tail + Environment.NewLine);
         mFileInfo.Ripper = "Unknown";
-        return string.Empty;
+        // ShouldSimulate = true;   need a force flag
       }
 
       var oldTail = tail;
@@ -275,22 +306,21 @@ namespace ConsoleApp {
       // default: empty string for Video: 720p, Bluray, x265 and audio: 2CH
       switch (mFileInfo.Ripper) {
       case "psa":
-        // found 'INTERNAL' with psa; 2019 Movie
         tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA.", "");
         tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA.", "");
         tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10.6");
+        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10");
         // see if really BrRip is found in original string
-        tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080.6");
-        tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080.6");
+        tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080");
+        tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080");
         // webrip psa
         tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
-        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10.6");
+        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10");
         break;
 
       // RMTeam
       case "RMT":
-        tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT.Rem");
+        tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT");
         tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
         // RMTeam 1080p
         tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080.RMT");
@@ -299,16 +329,16 @@ namespace ConsoleApp {
       // HETeam
       case "HET":
         tail = tail.Replace("720p.BluRay.x265-HETeam", "HET");
-        tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080.6.HET.Ext");
-        tail = tail.Replace("1080p.BluRay.x265-HETeam", "1080.6.HET");
+        tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080.HET.Ext");
+        tail = tail.Replace("1080p.BluRay.x265-HETeam", "1080.HET");
         break;
 
       default:
         break;
       }
 
-      if (tail == oldTail)
-        Console.WriteLine("Unkown " + mFileInfo.Ripper + " pattern! Suffix: " + tail);
+      if (tail == oldTail && oldTail.EndsWith("mkv"))
+        Console.WriteLine("Unknown " + mFileInfo.Ripper + " pattern! Suffix: " + tail);
 
       if (string.IsNullOrEmpty(tail))
         return string.Empty;
@@ -335,22 +365,27 @@ namespace ConsoleApp {
       if (!IsSingleStaged)
         foreach (CONVERTSTAGE stage in (CONVERTSTAGE[])Enum.GetValues(typeof(CONVERTSTAGE))) {
           Stage = stage;
+          if (mFileInfo.IsInError)
+            break;
 
-          bool isSuccess = true;    // this is not properly used yet; can utilize FileInfo if required
           switch (Stage) {
             case CONVERTSTAGE.ExtractArchive:
-              isSuccess = ExtractRar(filePath);
+              ExtractRar(filePath);
               break;
             case CONVERTSTAGE.RenameFile:
               RenameFile();
               break;
-            case CONVERTSTAGE.ExtractSubtitle:
-              if (!ShouldSimulate || (isSuccess && !mFileInfo.ModInfo.Contains("extract"))) {
-                // accept containers containing subrip: currently only mkv
-                if (IsSupportedMedia(mFileInfo.Path)) {
-                  var extractSub = new FFMpegUtil(ref mFileInfo);
-                  mFileInfo = await extractSub.Run(ShouldSimulate);
-                }
+            case CONVERTSTAGE.ExtractMedia:
+              // accept containers containing subrip: currently only mkv
+              if (IsSupportedMedia(mFileInfo.Path) && (!ShouldSimulate || !mFileInfo.ModInfo.Contains("extract"))) {
+                // extract already checked for it
+                if (! mFileInfo.ModInfo.Contains("extract"))
+                  HasEnoughFreeSpace((new System.IO.FileInfo(mFileInfo.Path)).Length);
+                if (mFileInfo.IsInError)
+                  break;
+
+                var extractSub = new FFMpegUtil(ref mFileInfo);
+                mFileInfo = await extractSub.Run(ShouldSimulate);
               }
               break;
             case CONVERTSTAGE.CreateArchive:
