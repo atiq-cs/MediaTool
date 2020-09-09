@@ -9,6 +9,8 @@ namespace ConsoleApp {
   /// Entry Point class containing command line parser and instantiator main
   /// method
   /// Usage: check read me
+  /// 
+  /// https://docs.microsoft.com/en-us/dotnet/core/tutorials/cli-create-console-app
   /// </summary>
   class MediaToolDemo {
     public class CommandLine {
@@ -77,6 +79,11 @@ namespace ConsoleApp {
       }
     }
 
+    /// <summary>
+    /// Input dir ends with '\upload' default action is compress (deflate)
+    /// </summary>
+    /// <param name="args"></param>
+    /// <returns></returns>
     static async Task Main(string[] args) {
       var options = new CommandLine(args);
       if (options.ValidateCommandLine() == false)

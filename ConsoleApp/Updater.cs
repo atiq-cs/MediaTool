@@ -58,8 +58,10 @@ namespace ConsoleApp {
         var needle = "Release builds are recommended for distributors";
         int start = responseBody.IndexOf(needle);
         if (start == -1) {
-          Console.WriteLine("Release build pattern string not found!");
+          Console.WriteLine("Release build pattern string not found!" + responseBody);
           client.Dispose();
+          // manual hack for now, since JS is blocked
+          // return "4.3.1";
           return version;
         }
         needle = "name=\"v\" value=\"";
