@@ -261,7 +261,7 @@ namespace ConsoleApp {
     private string GetTitle() {
       // expecting at least 3 chars before year
       if (mFileInfo.YearPosition < 3)
-        throw new ArgumentException("Wrong year position: " + mFileInfo.YearPosition + "!");
+        throw new ArgumentException("Year not found in title; year position: " + mFileInfo.YearPosition + "!");
 
       var fileName = GetSimplifiedPath(mFileInfo.Path);
 
@@ -278,6 +278,7 @@ namespace ConsoleApp {
     /// 
     /// Analyze ripper; save in file info
     /// Apply replacement pattern based on ripper, HETeam - 'und' and no info
+    /// ToDo: read audio language and use that on file name, for RMTeam only
     /// </summary>
     private string GetRipperInfo() {
       // read these mapping from config file
@@ -306,16 +307,17 @@ namespace ConsoleApp {
       // default: empty string for Video: 720p, Bluray, x265 and audio: 2CH
       switch (mFileInfo.Ripper) {
       case "psa":
-        tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA", "10");
+        tail = tail.Replace("REMASTERED.720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
+        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
+        tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "8");
+        tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "8");
+        tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "8");
         // see if really BrRip is found in original string
         tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080");
         tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080");
         // webrip psa
-        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
         tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10");
+        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
         break;
 
       // RMTeam
@@ -338,7 +340,7 @@ namespace ConsoleApp {
       }
 
       if (tail == oldTail && oldTail.EndsWith("mkv"))
-        Console.WriteLine("Unknown " + mFileInfo.Ripper + " pattern! Suffix: " + tail);
+        Console.WriteLine("Unknown " + mFileInfo.Ripper + " pattern! Suffix: " + tail.Substring(0, tail.Length-4));
 
       if (string.IsNullOrEmpty(tail))
         return string.Empty;
@@ -414,7 +416,7 @@ namespace ConsoleApp {
 
 
     /// <summary>
-    /// FIles with name like movie-partddd.rar will still fail
+    /// Files with name like movie-partddd.rar will still fail
     /// We only check upto 2 digits
     /// </summary>
     private bool IsSupportedArchive(string path, bool extractPurpose = true) {
