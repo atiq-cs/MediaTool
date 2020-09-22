@@ -34,6 +34,7 @@ namespace ConsoleApp {
     public void Update(string str) {
       if (!IsInError) {
         if (str.Contains("Fail")) {
+          Console.WriteLine($"Error: {str.Substring(6)}!");
           IsInError = true;
           return ;
         }
