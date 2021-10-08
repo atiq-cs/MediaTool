@@ -200,7 +200,8 @@ namespace ConsoleApp {
 
       foreach(var stream in probeObj.Streams) {
         string CodecType = stream.codec_type;
-        Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name}");
+        Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name} lang: " + (stream.tags
+          .ContainsKey("language")?stream.tags["language"]:"null"));
 
         switch (CodecType) {
           case "subtitle":
@@ -210,11 +211,13 @@ namespace ConsoleApp {
             }
 
             // (eng)
-            if (stream.tags.ContainsKey("language") && stream.tags["language"] == "eng" && string.IsNullOrEmpty(sCodeId))
+            if (stream.tags.ContainsKey("language") && stream.tags["language"] == "eng" && string.
+                IsNullOrEmpty(sCodeId))
               sCodeId = "0:" + stream.index.ToString();
-            else if (string.IsNullOrEmpty(initialSCodecId))
+            else if (string.IsNullOrEmpty(initialSCodecId)) {
+              Console.WriteLine("defaulting to initial s index");
               initialSCodecId = "0:" + stream.index.ToString();
-
+            }
 
             // Discovery; after enough data remove this
             switch (mFileInfo.Ripper) {
@@ -234,6 +237,8 @@ namespace ConsoleApp {
             case "HET":
               if (stream.codec_name == "hdmv_pgs_subtitle")
                 Console.WriteLine("HET hdmv_pgs_subtitle skipping..");
+              else if (stream.codec_name == "dvd_subtitle")
+                Console.WriteLine("HET dvd_subtitle skipping..");
               else if (string.IsNullOrEmpty(sCodeId)) {
                 sCodeId = "0:" + stream.index.ToString();
               }
@@ -253,7 +258,7 @@ namespace ConsoleApp {
 
           case "audio":
             // show warning for non- 'eng' Audio i.e., und, rus, dan, kor, pol, chi
-            if (stream.codec_name != "aac") {
+            if (stream.codec_name != "aac" && stream.codec_name != "mp3") {
               Console.WriteLine("Unsupported audio: " + stream.codec_name);
               break;
             }
@@ -303,18 +308,21 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(aCodeId)) {
         if (aCount == 1) {
           aCodeId = initialACodecId;
-          Console.WriteLine("Audio stream index: " + aCodeId + " (eng) not found");
+          Console.WriteLine("Audio stream index: " + aCodeId + "; (eng) not found in audio metadata");
         }
         else if (aCount > 1) {
-          // show error and stop
-          mFileInfo.Update("Fail: Audio streams# " + aCount + ", (eng) audio not found! Disabling container change..");
+          // enabled last time with hindi movie
+          Console.WriteLine("Warning: Audio streams# " + aCount + ", (eng) audio not found! Disabling container change.. Defaulting..");
+          // previously we used to show error and stop
+          // mFileInfo.Update("Fail: Audio streams# " + aCount + ", (eng) audio not found! Disabling container change..");
+          aCodeId = initialACodecId;
           ShouldChangeContainer = false;
         }
       }
       else
         Console.WriteLine("Audio stream index: " + aCodeId);
 
-      System.Diagnostics.Debug.Assert(! string.IsNullOrEmpty(aCodeId));
+      System.Diagnostics.Debug.Assert(ShouldChangeContainer && ! string.IsNullOrEmpty(aCodeId));
       return (sCodeId + ' ' + aCodeId);
     }
 

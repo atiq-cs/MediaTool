@@ -160,6 +160,11 @@ namespace ConsoleApp {
       var ripInfo = GetRipperInfo();
 
       var outFileName = mFileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
+      // Support TV Shows, look for E\d\d pattern
+      string pattern = @"^E\d{2}";
+      if (string.IsNullOrEmpty(year) && System.Text.RegularExpressions.Regex.IsMatch(title, pattern, System.Text.RegularExpressions.
+        RegexOptions.IgnoreCase))
+        outFileName = mFileInfo.Parent + '\\' + title + ripInfo;
 
       if (mFileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
@@ -259,11 +264,25 @@ namespace ConsoleApp {
     /// </remarks>
     /// </summary>
     private string GetTitle() {
-      // expecting at least 3 chars before year
-      if (mFileInfo.YearPosition < 3)
-        throw new ArgumentException("Year not found in title; year position: " + mFileInfo.YearPosition + "!");
-
       var fileName = GetSimplifiedPath(mFileInfo.Path);
+
+      // expecting at least 3 chars before year
+      if (mFileInfo.YearPosition < 3) {
+        // Check for TV Shows
+        string pattern = @"S\d{2}E\d{2}";
+        var match = System.Text.RegularExpressions.Regex.Match(fileName, pattern, System.Text.RegularExpressions.
+          RegexOptions.IgnoreCase);
+        if (match.Success) {
+          Console.WriteLine("matched " + match.Value);
+          // set the position value in getRipperInfo method instead where pattern is detected
+          // different than Movies where this is set based year string
+          mFileInfo.YearPosition = match.Index + match.Value.Length + 1;
+          return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(match.Value.Substring(3));
+        }
+        else
+          throw new ArgumentException("Year not found in title; year position: " + mFileInfo.YearPosition + "!");
+      }
+
 
       // replace all the dots with space till that index
       var title = fileName.Substring(0, mFileInfo.YearPosition).Replace('.', ' ');
@@ -272,7 +291,8 @@ namespace ConsoleApp {
 
     /// <summary>
     /// Rename using pattern, usually applies on the tail part of the name
-    /// Br.10.6.psa = 720p.BrRip.10bit.6ch.psarip
+    //  For Movies,
+    ///  '' = 720p.BrRip.10bit.6ch.psa
     /// 
     /// It would be probably a good idea to make the rules dynamic: move to a file
     /// 
@@ -284,12 +304,14 @@ namespace ConsoleApp {
       // read these mapping from config file
       var fileName = GetSimplifiedPath(mFileInfo.Path);
       var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
+      Console.WriteLine("file name: " + fileName + " tail " + tail);
+      Console.WriteLine($"year pos: {mFileInfo.YearPosition}, length: {mFileInfo.YearLength}" + Environment.NewLine);
 
       // ToDo: recognize TV Shows
       // apply ripper patterns
       // psa
       // simplify may be using a loop
-      if (tail.Contains("x265.HEVC-PSA") || tail.Length == 3 || tail.Substring(0, tail.Length-3).EndsWith("6."))
+      if (tail.Contains("x265.HEVC-PSA") || tail.Length == 3 || tail.Substring(0, tail.Length-3).EndsWith("8."))
         mFileInfo.Ripper = "psa";
       else if (tail.Contains("x265.rmteam") || tail.Substring(0, tail.Length - 3).EndsWith("RMT."))
         mFileInfo.Ripper = "RMT";
@@ -318,6 +340,8 @@ namespace ConsoleApp {
         // webrip psa
         tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10");
         tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
+        // TV Shows
+        tail = tail.Replace("720p.HDTV.2CH.x265.HEVC-PSA.", "");
         break;
 
       // RMTeam
