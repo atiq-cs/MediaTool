@@ -1,9 +1,21 @@
 # Media Tool
-A media tool to automate some actions on media files.
+This is a Lite Video Converter Console Tool properly written with async support.
+
+Background: mkv file can contain unnecessary subtitles and audio streams. There are i18n audio streams and subtitles that we are not interested in. This tool solves that problem.
+
+At present this tool is an mkv to mp4 converter. It does folowing while performing conversion.
+- extract eng subtitle as subrip
+- if there are multiple audio channels only keep the eng audio to output mp4 along with the video
+- corrects some metadata of the video
+
+
+This media tool,
 - Utilizes asynchronus tasks
 - Utilizes ffmpeg to extract english subtitle properly and change container to mp4
 - Can detect garbage subtitles files and can get rid of them
 - Shorten advertisement durations for supported sources i.e., psa
+
+In addition, the tool shows mediainfo.
 
 ## Example Usage
 Here's some example runs,
