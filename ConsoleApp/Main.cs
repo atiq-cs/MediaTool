@@ -58,7 +58,7 @@ namespace ConsoleApp {
         else
           Path = Action;
 
-        // verify path, path is mandatory if action is not update
+        // verify path, path is mandatory if action is anything but update
         if (string.IsNullOrEmpty(Path) || (!System.IO.File.Exists(Path) && !System.IO.Directory.
           Exists(Path))) {
           Console.WriteLine("Given path is invalid!");

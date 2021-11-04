@@ -10,7 +10,7 @@ namespace ConsoleApp {
 
   /// <summary>
   /// Perform actions on Media Files
-  /// 
+  ///
   /// Documentation (requirements/features/design decisions) at
   ///  https://github.com/atiq-cs/MediaTool/wiki/Design-Requirements
   /// 
@@ -159,12 +159,21 @@ namespace ConsoleApp {
       var title = GetTitle();
       var ripInfo = GetRipperInfo();
 
+      // Console.WriteLine("year: " + year);
+      // Console.WriteLine("title: " + title);
+      // Console.WriteLine("ripInfo: " + ripInfo);
+
       var outFileName = mFileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
       // Support TV Shows, look for E\d\d pattern
       string pattern = @"^E\d{2}";
-      if (string.IsNullOrEmpty(year) && System.Text.RegularExpressions.Regex.IsMatch(title, pattern, System.Text.RegularExpressions.
-        RegexOptions.IgnoreCase))
-        outFileName = mFileInfo.Parent + '\\' + title + ripInfo;
+      if (string.IsNullOrEmpty(year) && System.Text.RegularExpressions.Regex.IsMatch(title, pattern,
+          System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
+            // temporary patch: to uppercase title for TV Shows
+        var ext = ripInfo.Substring(ripInfo.Length-4);
+        outFileName = mFileInfo.Parent + '\\' + title + ripInfo.Substring(0, ripInfo.Length-4).Replace('.', ' ') + ext;
+      }
+
+      // Console.WriteLine("output File Name: " + outFileName);
 
       if (mFileInfo.Path != outFileName) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
