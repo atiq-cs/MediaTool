@@ -259,6 +259,10 @@ namespace ConsoleApp {
       if (string.IsNullOrEmpty(year))
         year = match.Value.Substring(1, match.Value.Length - 2);
 
+      // Could be due to bad parsing, throw exception to catch this instead
+      if (year == "1080")
+        throw new InvalidCastException("Bad parsing: got 1080 as year!");
+
       mFileInfo.YearPosition = match.Index;
       mFileInfo.YearLength = match.Length;
       return year;
@@ -347,8 +351,9 @@ namespace ConsoleApp {
         tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080");
         tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080");
         // webrip psa
-        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.10");
-        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web");
+        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.");
+        tail = tail.Replace("720p.10bit.WEBRip.2CH.x265.HEVC-PSA", "web.2");
+        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.8");
         // TV Shows
         tail = tail.Replace("720p.HDTV.2CH.x265.HEVC-PSA.", "");
         break;

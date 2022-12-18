@@ -11,17 +11,16 @@ namespace ConsoleApp {
   internal class FFMpegUtil {
     /// <summary>
     /// Props/methods related to single file processing
+    /// </summary>
     /// <remarks>
     /// Member variable probably cannot be reference
     /// A solution is to pass this to methods
-    /// </remarks>
     /// <c>code block inline example</c>
     ///
     /// Later, may be verify if found block contains property as well.
     /// Don't pass `filePath` as param, it is updated by rename and should be retrieved from FileInfo
     /// https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
-    /// </summary>
-
+    /// </remarks>
     public FFMpegUtil(ref FileInfoType fileInfo) {
       FFMpegPath = @"D:\PFiles_x64\PT\ffmpeg";
       this.mFileInfo = fileInfo;
@@ -200,8 +199,8 @@ namespace ConsoleApp {
 
       foreach(var stream in probeObj.Streams) {
         string CodecType = stream.codec_type;
-        Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name} lang: " + (stream.tags
-          .ContainsKey("language")?stream.tags["language"]:"null"));
+        Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name} lang: " + (
+          stream.tags != null && stream.tags.ContainsKey("language")?stream.tags["language"]:"null"));
 
         switch (CodecType) {
           case "subtitle":
@@ -258,8 +257,8 @@ namespace ConsoleApp {
 
           case "audio":
             // show warning for non- 'eng' Audio i.e., und, rus, dan, kor, pol, chi
-            if (stream.codec_name != "aac" && stream.codec_name != "mp3") {
-              Console.WriteLine("Unsupported audio: " + stream.codec_name);
+            if (stream.codec_name != "aac" && stream.codec_name != "mp3" && stream.codec_name != "vorbis") {
+              Console.WriteLine($"Unsupported audio: {stream.codec_name}!");
               break;
             }
 
@@ -322,7 +321,7 @@ namespace ConsoleApp {
       else
         Console.WriteLine("Audio stream index: " + aCodeId);
 
-      System.Diagnostics.Debug.Assert(ShouldChangeContainer && ! string.IsNullOrEmpty(aCodeId));
+      System.Diagnostics.Debug.Assert(ShouldChangeContainer && ! string.IsNullOrEmpty(aCodeId), "No supported audio found!");
       return (sCodeId + ' ' + aCodeId);
     }
 
@@ -433,6 +432,10 @@ namespace ConsoleApp {
           //  " -codec:s srt -map " + sCodecId
           Arguments = " -loglevel warning -i \""+ filePath + "\"" + " -sn -map_chapters -1 -codec:v" + 
             " copy -map 0:v:0 -acodec copy -map " + aCodecId + " \"" + mpegFilePath + "\"",
+            // https://trac.ffmpeg.org/wiki/Encode/AAC
+            //  40k bit rate 
+            // " copy -map 0:v:0 -acodec libfdk_aac -profile:a aac_he_v2 -b:a 40k -map " + aCodecId + " \"" + mpegFilePath + "\"",
+            
           UseShellExecute = false
         },
         EnableRaisingEvents = true }
