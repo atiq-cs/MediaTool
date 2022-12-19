@@ -6,6 +6,7 @@ namespace ConsoleApp {
   using System.IO;
   using System.Net.Http;
   using System.Threading.Tasks;
+  using SharpCompress.Archives;
   
   /// <summary>
   /// Class to represent entity that performs update of local ffmpeg to latest stable version
@@ -34,6 +35,7 @@ namespace ConsoleApp {
     /// Demonstrates,
     /// - how to catch exception from async methods
     /// - how to download an html page using single call <c> GetStringAsync </c>
+    /// HttpClient ref, https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclient
     /// </remarks>
     /// </summary>
     private async Task<string> GetLatestFFMpegVersionAsync() {
@@ -41,21 +43,22 @@ namespace ConsoleApp {
       HttpClient client = new HttpClient();
       // Call asynchronous network methods in a try/catch block to handle exceptions
       try {
-        var windowsFFMpegBuildUri = new Uri("https://ffmpeg.zeranoe.com/builds/");
+        var windowsFFMpegBuildURL = "https://www.gyan.dev/ffmpeg/builds/#release-builds";
         string responseBody = string.Empty;
+        // Add TLS v11 and v12
         // For Exception: Unable to read data from the transport connection: An existing connection
         // was forcibly closed by the remote host.
-        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls11 |
-          System.Net.SecurityProtocolType.Tls12;
+        // System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls11 |
+        //   System.Net.SecurityProtocolType.Tls12;
         // do we need double try catch for catching exception from await? Confirm
         try {
-          responseBody = await client.GetStringAsync(windowsFFMpegBuildUri);
+          responseBody = await client.GetStringAsync(windowsFFMpegBuildURL);
         } catch (Exception e) {
           Console.WriteLine("Exception: " + e.Message);
           return version;
         }
 
-        var needle = "Release builds are recommended for distributors";
+        var needle = "latest release";
         int start = responseBody.IndexOf(needle);
         if (start == -1) {
           Console.WriteLine("Release build pattern string not found!" + responseBody);
@@ -64,7 +67,7 @@ namespace ConsoleApp {
           // return "4.3.1";
           return version;
         }
-        needle = "name=\"v\" value=\"";
+        needle = "version: <span id=\"release-version\">";
 
         if ((start = responseBody.IndexOf(needle, start + needle.Length)) == -1) {
           Console.WriteLine("Version placeholder string not found!");
@@ -72,9 +75,10 @@ namespace ConsoleApp {
           return version;
         }
         start += needle.Length;
-        int end = responseBody.IndexOf('"', start);
+        var tail = "</span>";
+        int end = responseBody.IndexOf(tail, start);
         if (end == -1) {
-          Console.WriteLine("ending quote for version not found!");
+          Console.WriteLine("ending html tag after version string not found!");
           client.Dispose();
           return version;
         }
@@ -91,11 +95,17 @@ namespace ConsoleApp {
     }
 
     private string GetLocalFFMpegVersion() {
+      var ffmpegBinPath = ffmpegLocation + @"\bin\ffmpeg.exe";
+      if (File.Exists(ffmpegBinPath) == false) {
+        Console.WriteLine("FFMpeg is not installed in specified location!");
+        return "4.0.0"; // some old version string
+      }
+
       string version = string.Empty;
       // Start the child process.
       var p = new System.Diagnostics.Process();
       // Redirect the output stream of the child process.
-      p.StartInfo.FileName = ffmpegLocation + @"\bin\ffmpeg.exe";
+      p.StartInfo.FileName = ffmpegBinPath;
       p.StartInfo.Arguments = "-version";
       p.StartInfo.UseShellExecute = false;
       p.StartInfo.RedirectStandardOutput = true;
@@ -124,6 +134,44 @@ namespace ConsoleApp {
       return version;
     }
 
+
+    /// <summary>
+    /// Extract 7zip Archives and clean up
+    /// TODO: Needs an async version for this.. Fix breaking Async/Await
+    /// </summary>
+    /// <param name="filePath">the file path variable</param>
+    /// <returns></returns>
+    public bool Extract7zArchive(string filePath) {
+      using (var archive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(filePath)) {
+        // archive not null when next archive is not found 
+        try {
+          // ToDO: show warning for multiple files
+          foreach (var entry in archive.Entries)
+            entry.WriteToDirectory(Path.GetDirectoryName(filePath), new SharpCompress.Common.ExtractionOptions() {
+              ExtractFullPath = true,
+              Overwrite = true }
+            );
+        }
+        catch (System.ArgumentException e) {
+          Console.WriteLine("Probably could not find next archive! Msg:\r\n" + e.Message);
+          return false;
+        }
+      }
+
+      Console.WriteLine("Removing file: " + filePath);
+      FileOperationAPIWrapper.Send(filePath);
+
+      return true;
+    }
+
+    /// <summary>
+    /// Download the binary and extract it into specified dir
+    /// <remarks>
+    /// net 7 web client deprecated last year
+    /// HttpClient ref, https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclient
+    /// </remarks>
+    /// </summary>
+
     private async Task UpdateLocalFFMpeg(string localVersion, string latestVersion) {
       Console.WriteLine("Updating..");
       var dirToDelete = ffmpegLocation + "." + localVersion;
@@ -134,17 +182,18 @@ namespace ConsoleApp {
       await Task.Delay(10000);
       Directory.Move(ffmpegLocation, dirToDelete);
       // example URL: 
-      var ffmpegURL = "https://ffmpeg.zeranoe.com/builds/win64/shared/ffmpeg-" + latestVersion + "-win64-shared.zip";
+      var ffmpegURL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-" + latestVersion + "-full_build-shared.7z";
       // download and extract latest ffmpeg
       HttpClient client = new HttpClient();
       // check later when getting exception about forcibly closed connetion on transport
       // System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls11 |
       //  System.Net.SecurityProtocolType.Tls12;
 
-      string newffmpegDirName = ffmpegLocation + "-" + latestVersion + "-win64-shared";
-      string zipFileNameWithExt = newffmpegDirName + ".zip";
+      string newffmpegDirName = ffmpegLocation + "-" + latestVersion + "-full_build-shared";
+      string archiveFileNameWithExt = newffmpegDirName + ".7z";
       Console.WriteLine("Downloading " + ffmpegURL);
-      Console.WriteLine("Temporarily saving to " + zipFileNameWithExt);
+      Console.WriteLine("Temporarily saving to " + archiveFileNameWithExt);
+
       // Send asynchronous request
       try {
         await client.GetAsync(ffmpegURL).ContinueWith(
@@ -154,18 +203,19 @@ namespace ConsoleApp {
           // Check that response was successful or throw exception
           response.EnsureSuccessStatusCode();
           // Read response asynchronously and save to file
-          response.Content.ReadAsFileAsync(zipFileNameWithExt, true);
+          response.Content.ReadAsFileAsync(archiveFileNameWithExt, true);
           });
-      } catch (Exception e) {
+      } catch (Exception e) { 
         Console.WriteLine("Exception: " + e.Message);
         return ;
       }
       // wait for file stream to release the file
       await Task.Delay(1000);
-      System.IO.Compression.ZipFile.ExtractToDirectory(zipFileNameWithExt, ffmpegLocation + @"\..\");
+      Extract7zArchive(archiveFileNameWithExt);
+      // System.IO.Compression.ZipFile.ExtractToDirectory(zipFileNameWithExt, ffmpegLocation + @"\..\");
       Directory.Move(newffmpegDirName, ffmpegLocation);
       FileOperationAPIWrapper.Send(dirToDelete);
-      FileOperationAPIWrapper.Send(zipFileNameWithExt);
+      FileOperationAPIWrapper.Send(archiveFileNameWithExt);
     }
 
     /// <summary>

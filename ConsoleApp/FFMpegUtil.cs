@@ -22,7 +22,7 @@ namespace ConsoleApp {
     /// https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
     /// </remarks>
     public FFMpegUtil(ref FileInfoType fileInfo) {
-      FFMpegPath = @"D:\PFiles_x64\PT\ffmpeg";
+      FFMpegPath = @"C:\PFiles_x64\PT\ffmpeg";
       this.mFileInfo = fileInfo;
       ShouldChangeContainer = true;
     }

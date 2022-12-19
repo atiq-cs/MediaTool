@@ -69,14 +69,15 @@ namespace ConsoleApp {
     }
 
     /// <summary>
-    /// Extract Rar Archives and clean up
+    /// Extract Rar Archives and Clean up
     /// 
     /// https://docs.microsoft.com/en-us/dotnet/api/system.io.directory.getfiles
     /// 
-    /// References
-    /// base URL https://github.com/adamhathcock/sharpcompress/blob/master
+    /// Refs
+    /// - base URL: https://github.com/adamhathcock/sharpcompress/blob/master
     /// USAGE.md
-    /// src/SharpCompress/Common/ExtractionOptions.cs
+    /// - src/SharpCompress/Common/ExtractionOptions.cs
+    ///
     /// Deletion of compressed file after extracting it with nunrar
     ///  https://stackoverflow.com/q/17467951
     /// </summary>
