@@ -197,6 +197,9 @@ namespace ConsoleApp {
       string initialSCodecId = string.Empty;
       string aCodeId = string.Empty;
 
+      if (probeObj.Streams == null)
+        throw new InvalidOperationException("Possible bad input file!");
+
       foreach(var stream in probeObj.Streams) {
         string CodecType = stream.codec_type;
         Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name} lang: " + (
@@ -257,7 +260,8 @@ namespace ConsoleApp {
 
           case "audio":
             // show warning for non- 'eng' Audio i.e., und, rus, dan, kor, pol, chi
-            if (stream.codec_name != "aac" && stream.codec_name != "mp3" && stream.codec_name != "vorbis") {
+            // eac3 found with HET, x264 video
+            if (stream.codec_name != "aac" && stream.codec_name != "ac3" && stream.codec_name != "eac3" && stream.codec_name != "mp3" && stream.codec_name != "vorbis") {
               Console.WriteLine($"Unsupported audio: {stream.codec_name}!");
               break;
             }
