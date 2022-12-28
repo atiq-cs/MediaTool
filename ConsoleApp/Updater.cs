@@ -120,7 +120,8 @@ namespace ConsoleApp {
         return version;
       }
       start += needle.Length;
-      needle = " Copyright";  // local needle
+      // for zeranoe: ' Copyright'
+      needle = "-full_build-www.gyan.dev";  // gyan.dev's builds
       int end = output.IndexOf(needle, start);
       if (end == -1) {
         Console.WriteLine("ffmpeg version string end not found!");
