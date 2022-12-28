@@ -197,10 +197,11 @@ namespace ConsoleApp {
       string initialSCodecId = string.Empty;
       string aCodeId = string.Empty;
 
-      if (probeObj.Streams == null)
+      if (probeObj is null || probeObj.Streams is null)
         throw new InvalidOperationException("Possible bad input file!");
 
       foreach(var stream in probeObj.Streams) {
+
         string CodecType = stream.codec_type;
         Console.WriteLine($"index: {stream.index}, codec: {stream.codec_name} lang: " + (
           stream.tags != null && stream.tags.ContainsKey("language")?stream.tags["language"]:"null"));
@@ -211,6 +212,9 @@ namespace ConsoleApp {
               Console.WriteLine("Ignoring unsupported sub format: " + stream.codec_name);
               break;
             }
+
+            if (stream.tags is null)
+              throw new InvalidOperationException("Tag in subtitle meta stream doesn't exist!");
 
             // (eng)
             if (stream.tags.ContainsKey("language") && stream.tags["language"] == "eng" && string.
@@ -265,6 +269,9 @@ namespace ConsoleApp {
               Console.WriteLine($"Unsupported audio: {stream.codec_name}!");
               break;
             }
+
+            if (stream.tags is null)
+              throw new InvalidOperationException("Tag in subtitle meta stream doesn't exist!");
 
             // (eng) ... (default) Or (eng)
             if (stream.tags.ContainsKey("language") && stream.tags["language"] == "eng" && string.IsNullOrEmpty(aCodeId))

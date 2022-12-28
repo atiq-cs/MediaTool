@@ -21,6 +21,7 @@ namespace ConsoleApp {
       string[] arguments;
       public CommandLine(string[] arguments) {
         this.arguments = arguments;
+        Path = Action = string.Empty;
       }
 
       /// <summary>

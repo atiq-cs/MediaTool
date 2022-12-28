@@ -143,12 +143,16 @@ namespace ConsoleApp {
     /// <param name="filePath">the file path variable</param>
     /// <returns></returns>
     public bool Extract7zArchive(string filePath) {
+      var destDir = Path.GetDirectoryName(filePath);
+      if (destDir is null) {
+        throw new ArgumentNullException($"Parent of {filePath} is Null!");
+      }
       using (var archive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(filePath)) {
         // archive not null when next archive is not found 
         try {
           // ToDO: show warning for multiple files
           foreach (var entry in archive.Entries)
-            entry.WriteToDirectory(Path.GetDirectoryName(filePath), new SharpCompress.Common.ExtractionOptions() {
+            entry.WriteToDirectory(destDir, new SharpCompress.Common.ExtractionOptions() {
               ExtractFullPath = true,
               Overwrite = true }
             );

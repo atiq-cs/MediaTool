@@ -66,6 +66,7 @@ namespace ConsoleApp {
     /// </summary>
     public MediaTool(bool ShowFFMpegVersion) {
       this.ShouldShowFFV = ShowFFMpegVersion;
+      this.MediaLocation = string.Empty;  // not used, to avoid nullable warning
     }
 
     /// <summary>
