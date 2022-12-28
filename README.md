@@ -17,12 +17,14 @@ This media tool,
 - Shows media info.
 
 ### Example Usage
+\* Make starting with this app super easy for new users.
+
 Here's some example runs,
 
-    dotnet run -- update C:\ffmpeg simulate
-    dotnet run -- update C:\ffmpeg
     dotnet run -- convert D:\Movies simulate
     dotnet run -- convert D:\Movies
+    dotnet run -- convert 'D:\Movies\Top Gun 1996*ripinfo.mkv'
+    dotnet run -- convert 'D:\Movies\Top Gun 1996*ripinfo.mkv' sim
     dotnet run -- --rename --path D:\Movies
 
 

@@ -156,30 +156,49 @@ namespace ConsoleApp {
       if (IsSupportedArchive(filePath, false))
         return ;
 
-      var year = GetYear();
-      var title = GetTitle();
-      var ripInfo = GetRipperInfo();
+      bool isShow = false;
+      // After rename expect, pattern @"^E\d{2}"
+      string showEpRegEx = @"S\d{2}E\d{2}";
+      var fileName = GetSimplifiedPath(mFileInfo.Path);
+      if (System.Text.RegularExpressions.Regex.IsMatch(fileName, showEpRegEx,
+          System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+          isShow = true;
 
-      // Console.WriteLine("year: " + year);
-      // Console.WriteLine("title: " + title);
-      // Console.WriteLine("ripInfo: " + ripInfo);
+      var year = string.Empty;
+      var title = string.Empty;
+      var ripInfo = string.Empty;
 
-      var outFileName = mFileInfo.Parent + '\\' + title + ' ' + year + ripInfo;
+      if (isShow) {
+        ripInfo = GetRipperInfo(fileName,isShow);
+        title = GetTitle(fileName, isShow);
+      }
+      else {
+        year = GetYear();
+        title = GetTitle(fileName, isShow);
+        ripInfo = GetRipperInfo(fileName, isShow);
+
+        Console.WriteLine("year: " + year);
+      }
+
+      Console.WriteLine("title: '" + title + "'");
+      Console.WriteLine("ripInfo: " + ripInfo);
+
+      // Movies
+      // This to support uncategorized Media
+      var yearWithSpace = (string.IsNullOrEmpty(year)? string.Empty : ' ') + year;
+      var outFileName = mFileInfo.Parent + '\\' + title + yearWithSpace + ripInfo;
+
       // Support TV Shows, look for E\d\d pattern
-      string pattern = @"^E\d{2}";
-      if (string.IsNullOrEmpty(year) && System.Text.RegularExpressions.Regex.IsMatch(title, pattern,
-          System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
-            // temporary patch: to uppercase title for TV Shows
-        var ext = ripInfo.Substring(ripInfo.Length-4);
-        outFileName = mFileInfo.Parent + '\\' + title + ripInfo.Substring(0, ripInfo.Length-4).Replace('.', ' ') + ext;
+      if (isShow) {
+        outFileName = mFileInfo.Parent + '\\' + title + ripInfo;
       }
 
       // Console.WriteLine("output File Name: " + outFileName);
-
-      if (mFileInfo.Path != outFileName) {
+      // Windows: file names are not case sensitive; hence utilize ToLower for Comparison
+      if (mFileInfo.Path.ToLower() != outFileName.ToLower()) {
         // May be we need modification flag for each stage i.e., rename, media conversion and so on..
         mFileInfo.Update("rename");
-        Console.WriteLine("   " + GetSimplifiedPath(mFileInfo.Path) + ": " + mFileInfo.ModInfo);
+        Console.WriteLine("   " + fileName + ": " + mFileInfo.ModInfo);
         Console.WriteLine("-> " + GetSimplifiedPath(outFileName));
       }
 
@@ -254,8 +273,11 @@ namespace ConsoleApp {
       else
         match = System.Text.RegularExpressions.Regex.Match(fileName, @"(.|,| )\d{4}(.|,| )");
 
-      if (! match.Success)
+      if (! match.Success) {
+        // Supporting uncategorized: neither Movie nor a Show (TV-MA)
+        mFileInfo.YearPosition = fileName.Length-4;
         return "";
+      }
 
       if (string.IsNullOrEmpty(year))
         year = match.Value.Substring(1, match.Value.Length - 2);
@@ -277,27 +299,34 @@ namespace ConsoleApp {
     /// Shares `FileInfo.YearPosition` with GetRipperInfo
     /// </remarks>
     /// </summary>
-    private string GetTitle() {
-      var fileName = GetSimplifiedPath(mFileInfo.Path);
-
-      // expecting at least 3 chars before year
-      if (mFileInfo.YearPosition < 3) {
-        // Check for TV Shows
+    private string GetTitle(string fileName, bool isShow) {
+      if (isShow) {
+        var showTitle = fileName.Substring(0, mFileInfo.YearPosition);
+        // Logic for TV Shows
         string pattern = @"S\d{2}E\d{2}";
-        var match = System.Text.RegularExpressions.Regex.Match(fileName, pattern, System.Text.RegularExpressions.
+        var match = System.Text.RegularExpressions.Regex.Match(showTitle, pattern, System.Text.RegularExpressions.
           RegexOptions.IgnoreCase);
         if (match.Success) {
-          Console.WriteLine("matched " + match.Value);
-          // set the position value in getRipperInfo method instead where pattern is detected
-          // different than Movies where this is set based year string
-          mFileInfo.YearPosition = match.Index + match.Value.Length + 1;
-          return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(match.Value.Substring(3));
+          Console.WriteLine("TV Show token found at index: " + match.Index);
+          var titleStr = showTitle.Substring(match.Index+3);    // acutally EP + Title
+          if (titleStr.Length == 4 && titleStr.EndsWith('.'))
+            titleStr = titleStr.Substring(0, titleStr.Length-1);
+          titleStr = titleStr.Replace('.', ' ');
+
+          return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(titleStr);
         }
-        else
-          throw new ArgumentException("Year not found in title; year position: " + mFileInfo.YearPosition + "!");
+        // else
+        // TV Show token not found: not expected to reach here
+
+      }
+      // expecting at least 3 chars before year
+      else if (mFileInfo.YearPosition < 3) {
+        throw new ArgumentException("Year not found in title; year position: " + mFileInfo.YearPosition + "!"
+          + Environment.NewLine +
+            " Media file: " + GetSimplifiedPath(mFileInfo.Path));
       }
 
-
+      // Logic for movie, this part depends on GetYear
       // replace all the dots with space till that index
       var title = fileName.Substring(0, mFileInfo.YearPosition).Replace('.', ' ');
       return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(title);
@@ -314,19 +343,23 @@ namespace ConsoleApp {
     /// Apply replacement pattern based on ripper, HETeam - 'und' and no info
     /// ToDo: read audio language and use that on file name, for RMTeam only
     /// </summary>
-    private string GetRipperInfo() {
+    private string GetRipperInfo(string fileName, bool isShow) {
       // read these mapping from config file
-      var fileName = GetSimplifiedPath(mFileInfo.Path);
-      var tail = fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
-      Console.WriteLine("file name: " + fileName + " tail " + tail);
-      Console.WriteLine($"year pos: {mFileInfo.YearPosition}, length: {mFileInfo.YearLength}" + Environment.NewLine);
+      var tail = isShow? fileName : fileName.Substring(mFileInfo.YearPosition + mFileInfo.YearLength);
+
+      if (!isShow) {
+        Console.WriteLine("file name: " + fileName + " tail " + tail);
+        Console.WriteLine($"year pos: {mFileInfo.YearPosition}, length: {mFileInfo.YearLength}" + Environment.NewLine);
+      }
 
       // ToDo: recognize TV Shows
       // apply ripper patterns
-      // psa
+      //  psa is default
       // simplify may be using a loop
-      if (tail.Contains("x265.HEVC-PSA") || tail.Length == 3 || tail.Substring(0, tail.Length-3).EndsWith("8."))
-        mFileInfo.Ripper = "psa";
+      if (tail.Contains("x265.HEVC-PSA") || tail.Length == 3 || tail.Substring(0, tail.Length-3).Contains("8."))
+        mFileInfo.Ripper = "PSA";
+      else if (tail.Contains(" Joy)") || tail.Substring(0, tail.Length - 3).EndsWith("Joy."))
+        mFileInfo.Ripper = "Joy";
       else if (tail.Contains("x265.rmteam") || tail.Substring(0, tail.Length - 3).EndsWith("RMT."))
         mFileInfo.Ripper = "RMT";
       else if (tail.Contains("x265-HETeam") || tail.Substring(0, tail.Length - 3).EndsWith("HET.") || tail.Substring(0, tail.Length - 3).EndsWith("HET.Ext"))
@@ -334,52 +367,95 @@ namespace ConsoleApp {
       else {
         Console.WriteLine("Unknown ripper! Suffix: " + tail + Environment.NewLine);
         mFileInfo.Ripper = "Unknown";
-        // ShouldSimulate = true;   need a force flag
+        // ShouldSimulate = true;   for a force flag to implement
       }
 
       var oldTail = tail;
-      // Console.WriteLine("tail: " + tail);   debug
 
-      // default: empty string for Video: 720p, Bluray, x265 and audio: 2CH
-      switch (mFileInfo.Ripper) {
-      case "psa":
-        tail = tail.Replace("REMASTERED.720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
-        tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "8");
-        tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "8");
-        tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "8");
-        // see if really BrRip is found in original string
-        tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080");
-        tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080");
-        // webrip psa
-        tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.");
-        tail = tail.Replace("720p.10bit.WEBRip.2CH.x265.HEVC-PSA", "web.2");
-        tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.8");
-        // TV Shows
-        tail = tail.Replace("720p.HDTV.2CH.x265.HEVC-PSA.", "");
-        break;
+      if (isShow == false) {
+        // TODO: Generalize and report if a pattern is hit
+        switch (mFileInfo.Ripper) {
+        // default: empty string for Video: 720p, Bluray, x265 and audio: 2CH
+        case "PSA":
+          tail = tail.Replace("REMASTERED.720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
+          // 720p.10bit.BluRay.6CH.x265.HEVC-PSA.
+          // 720p.10bit.BluRay.6CH.x265.HEVC-PSA
+          tail = tail.Replace("720p.10bit.BluRay.6CH.x265.HEVC-PSA.", "");
+          tail = tail.Replace("INTERNAL.720p.BrRip.2CH.x265.HEVC-PSA", "8");
+          tail = tail.Replace("720p.BluRay.2CH.x265.HEVC-PSA", "8");
+          tail = tail.Replace("720p.BrRip.2CH.x265.HEVC-PSA", "8");
+          // see if really BrRip is found in original string
+          tail = tail.Replace("1080p.BrRip.6CH.x265.HEVC-PSA", "1080");
+          tail = tail.Replace("1080p.BluRay.6CH.x265.HEVC-PSA", "1080");
+          // webrip psa
+          tail = tail.Replace("720p.10bit.WEBRip.6CH.x265.HEVC-PSA", "web.");
+          tail = tail.Replace("720p.10bit.WEBRip.2CH.x265.HEVC-PSA", "web.2");
+          tail = tail.Replace("720p.WEBRip.2CH.x265.HEVC-PSA", "web.8");
+          break;
 
-      // RMTeam
-      case "RMT":
-        tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT");
-        tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
-        // RMTeam 1080p
-        tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080.RMT");
-        break;
+        // HETeam
+        case "HET":
+          // Do not replace with this for TV-shows
+          tail = tail.Replace("720p.BluRay.x265-HETeam", "HET");
+          tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080.HET.Ext");
+          tail = tail.Replace("1080p.BluRay.x265-HETeam", "1080.HET");
+          break;
 
-      // HETeam
-      case "HET":
-        tail = tail.Replace("720p.BluRay.x265-HETeam", "HET");
-        tail = tail.Replace("Extended.1080p.BluRay.x265-HETeam", "1080.HET.Ext");
-        tail = tail.Replace("1080p.BluRay.x265-HETeam", "1080.HET");
-        break;
+        // RMTeam
+        case "RMT":
+          tail = tail.Replace("remastered.720p.bluray.hevc.x265.rmteam", "RMT");
+          tail = tail.Replace("720p.bluray.hevc.x265.rmteam", "RMT");
+          // RMTeam 1080p
+          tail = tail.Replace("1080p.bluray.dd5.1.hevc.x265.rmteam", "1080.RMT");
+          break;
 
-      default:
-        break;
+        // Joy HQ
+        case "Joy":
+          // 720p
+          tail = tail.Replace("(720p x265 q22 Joy)", "720.Joy");
+          tail = tail.Replace("(1080p x265 q22 Joy)", "Joy");
+          break;
+
+        default:
+          Console.WriteLine("Unknown ripper: applying default pattern");
+          tail = fileName.Substring(fileName.Length-3, 3);
+          break;
+        }
+      }
+      else { // Show / TV-MA
+        // Generalized Version
+        // Standard needle 720p or 1080p
+        // Covers
+        // Wildcard:
+        //  720p.*, .INTERNAL.*
+        // PSA:
+        //  720p.HDTV.2CH.x265.HEVC-PSA
+        // HET
+        //  720p.WEB-DL.x265-HETeam
+
+        // for future use,
+        // Joy: " (1080p x265 q22 Joy)"
+        // Panda: " (1080p", " (576p"
+
+        var needle = ".720p.";
+        var pos = fileName.IndexOf(needle);
+        if (pos >= 0) {
+          tail = fileName.Substring(fileName.Length-3, 3);
+          mFileInfo.YearPosition = pos;
+        }
+        // S\d\dE\d\d\.mkv, if logic below is hard to read though
+        else if (fileName[0] == 'S' && fileName[3] == 'E' && fileName[6] == '.') {
+          tail = fileName.Substring(fileName.Length-3, 3);
+          mFileInfo.YearPosition = fileName.Length-3;
+        }
+        else {
+          tail = fileName.Substring(fileName.Length-3, 3);
+          mFileInfo.YearPosition = fileName.Length-4;
+        }
       }
 
-      if (tail == oldTail && oldTail.EndsWith("mkv"))
-        Console.WriteLine("Unknown " + mFileInfo.Ripper + " pattern! Suffix: " + tail.Substring(0, tail.Length-4));
+      // if (tail == oldTail && oldTail.EndsWith("mkv"))
+      //   Console.WriteLine("Unknown " + mFileInfo.Ripper + " pattern! Suffix: " + tail.Substring(0, tail.Length-4));
 
       if (string.IsNullOrEmpty(tail))
         return string.Empty;
