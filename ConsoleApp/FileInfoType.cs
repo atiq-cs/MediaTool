@@ -24,7 +24,8 @@ namespace ConsoleApp {
 
     public void Init(string Path) {
       this.Path = Path;
-      this.Parent = System.IO.Path.GetDirectoryName(Path);
+      var parentStr = System.IO.Path.GetDirectoryName(Path);
+      this.Parent = (parentStr is null)? string.Empty: parentStr;
       IsModified = false;
       IsInError = false;
       // Lines = null;
@@ -53,5 +54,10 @@ namespace ConsoleApp {
 
     // list of actions being performed in the file
     public string ModInfo { get; set; }
+
+    public FileInfoType() {
+      Path = Parent = Ripper = string.Empty;
+      ModInfo = string.Empty;
+    }
   }
 }

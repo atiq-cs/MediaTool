@@ -263,7 +263,7 @@ namespace ConsoleApp {
         throw new InvalidOperationException(string.Format("File {0} already exists.", pathname));
       }
 
-      FileStream fileStream = null;
+      FileStream? fileStream = null;
       try {
         fileStream = new FileStream(pathname, FileMode.Create, FileAccess.Write, FileShare.None);
         return content.CopyToAsync(fileStream).ContinueWith(
